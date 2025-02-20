@@ -1,7 +1,10 @@
 name: signalr_chat_plugin
-description: "A new Flutter plugin project."
-version: 0.0.1
-homepage: 'https://flutter.dev'
+description: A Flutter plugin for integrating SignalR real-time chat.
+version: 1.0.0
+homepage: https://github.com/go2hyder/signalr_chat_plugin # Change to your GitHub repo
+repository: https://github.com/go2hyder/signalr_chat_plugin # Change to your repo
+issue_tracker: https://github.com/go2hyder/signalr_chat_plugin/issues
+documentation: https://github.com/go2hyder/signalr_chat_plugin/wiki
 
 environment:
   sdk: ^3.5.3
@@ -35,6 +38,13 @@ flutter:
   # adding or updating assets for this project.
   plugin:
     platforms:
+      android:
+        package: com.example.signalr_chat_plugin
+        pluginClass: SignalRChatPlugin
+      ios:
+        pluginClass: SignalRChatPlugin
+      web:
+        pluginClass: SignalRChatPlugin
     # This plugin project was generated without specifying any
     # platforms with the `--platform` argument. If you see the `some_platform` map below, remove it and
     # then add platforms following the instruction here:
