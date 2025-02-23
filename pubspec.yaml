@@ -8,13 +8,14 @@ documentation: https://github.com/go2hyder/signalr_chat_plugin/wiki
 
 environment:
   sdk: ^3.7.0
-  flutter: ">=1.10.0"
+  flutter: ">=1.20.0"
 
 dependencies:
   flutter:
     sdk: flutter
   plugin_platform_interface: ^2.1.8
   signalr_core: ^1.1.2
+  web:
 
 dev_dependencies:
   flutter_test:
