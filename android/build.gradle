@@ -1,0 +1,40 @@
+plugins {
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android") version "1.9.0"
+}
+
+group = "com.example.signalr_chat_plugin"
+version = "1.0"
+
+android {
+    namespace = "com.example.signalr_chat_plugin"
+    compileSdk = 33
+
+    sourceSets {
+        getByName("main").kotlin.srcDirs("src/main/kotlin")
+    }
+
+    defaultConfig {
+        minSdk = 16
+        targetSdk = 33
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+
+    lint {
+        disable += "InvalidPackage"
+    }
+}
+
+dependencies {
+    implementation("com.microsoft.signalr:signalr:5.0.0")
+    implementation("com.squareup.okhttp3:okhttp:4.9.1")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0")
+}

@@ -1,0 +1,2 @@
+C:/Users/DELL/Documents/GitHub/signalr_chat_plugin/example/android/app/.cxx/Debug/3g306o2b/x86_64/CMakeFiles/edit_cache.dir
+C:/Users/DELL/Documents/GitHub/signalr_chat_plugin/example/android/app/.cxx/Debug/3g306o2b/x86_64/CMakeFiles/rebuild_cache.dir

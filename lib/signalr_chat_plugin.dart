@@ -1,21 +1,31 @@
 import 'dart:async';
+import 'dart:developer';
+
 import 'package:signalr_core/signalr_core.dart';
-import 'dart:async';
-import 'dart:convert'; // Import this for JSON encoding
+
+import 'connection_options.dart';
+import 'message.dart';
 
 class SignalRChatPlugin {
   static final SignalRChatPlugin _instance = SignalRChatPlugin._internal();
   late HubConnection _connection;
   bool _isInitialized = false;
+  int _retryCount = 0;
+  final List<ChatMessage> _messageQueue = [];
 
-  final StreamController<String> _messageStreamController =
-      StreamController.broadcast();
-  Stream<String> get messagesStream => _messageStreamController.stream;
+  final StreamController<ChatMessage> _messageStreamController = StreamController.broadcast();
 
-  final StreamController<String> _connectionStatusController =
-      StreamController<String>.broadcast(); // 🔹 New stream
-  Stream<String> get connectionStatusStream =>
-      _connectionStatusController.stream; // 🔹 Expose status stream
+  Stream<ChatMessage> get messagesStream => _messageStreamController.stream;
+
+  final StreamController<ConnectionStatus> _connectionStateController = StreamController.broadcast();
+
+  Stream<ConnectionStatus> get connectionStateStream => _connectionStateController.stream;
+
+  final StreamController<String> _errorStreamController = StreamController.broadcast();
+
+  Stream<String> get errorStream => _errorStreamController.stream;
+
+  SignalRConnectionOptions? _options;
 
   factory SignalRChatPlugin() {
     return _instance;
@@ -23,148 +33,172 @@ class SignalRChatPlugin {
 
   SignalRChatPlugin._internal();
 
-  Future<void> reconnect() async {
-    while (_connection.state != HubConnectionState.connected) {
+  Future<void> _processMessageQueue() async {
+    if (_messageQueue.isEmpty) return;
+
+    while (_messageQueue.isNotEmpty && _connection.state == HubConnectionState.connected) {
+      final message = _messageQueue.first;
       try {
-        print("🔄 Attempting to reconnect...");
+        await sendMessage(message.sender, message.content);
+        _messageQueue.removeAt(0);
+      } catch (e) {
+        _errorStreamController.add('Failed to process queued message: $e');
+        break;
+      }
+    }
+  }
+
+  Future<void> reconnect() async {
+    if (_options == null || !_options!.autoReconnect) return;
+
+    while (_connection.state != HubConnectionState.connected && _retryCount < _options!.maxRetryAttempts) {
+      try {
+        _connectionStateController.add(ConnectionStatus.reconnecting);
         await _connection.start();
-        print("✅ Reconnected!");
-        _connectionStatusController.add("Online");
+        _connectionStateController.add(ConnectionStatus.connected);
+        _retryCount = 0;
+        await _processMessageQueue();
         break;
       } catch (e) {
-        print("❌ Reconnection failed. Retrying in 5 seconds...");
-        await Future.delayed(Duration(seconds: 5));
+        _retryCount++;
+        _errorStreamController.add('Reconnection attempt $_retryCount failed: $e');
+        if (_retryCount < _options!.maxRetryAttempts) {
+          await Future.delayed(_options!.reconnectInterval);
+        }
       }
+    }
+
+    if (_retryCount >= _options!.maxRetryAttempts) {
+      _connectionStateController.add(ConnectionStatus.disconnected);
+      _errorStreamController.add('Max reconnection attempts reached');
     }
   }
 
-  /// Initialize SignalR connection
-  Future<void> initSignalR(
-      {required String serverUrl, String? accessToken}) async {
+  Future<void> initSignalR(SignalRConnectionOptions options) async {
     try {
       if (_isInitialized) {
-        print("✅ SignalR already initialized.");
+        _errorStreamController.add('SignalR already initialized');
         return;
       }
-      Future<void> checkConnection() async {
-        try {
-          await _connection.invoke("CheckConnection", args: []);
-          print("✅ CheckConnection event sent!");
-        } catch (e) {
-          print("❌ Failed to send CheckConnection event: $e");
-        }
-      }
 
-      _connection = HubConnectionBuilder()
-          .withUrl(
-            serverUrl,
-            HttpConnectionOptions(
-              transport: HttpTransportType.longPolling,
-              accessTokenFactory:
-                  accessToken != null ? () async => accessToken : null,
-              logging: (level, message) => print("🔍 SignalR Log: $message"),
-            ),
-          )
-          .withAutomaticReconnect()
-          .build();
+      _options = options;
+      _connectionStateController.add(ConnectionStatus.connecting);
 
-      _connection.onclose((error) {
-        _connectionStatusController.add("Disconnected");
-        print("⚠️ SignalR Disconnected: $error");
-        print("⚠️ SignalR Disconnected: $error");
-        Future.delayed(Duration(seconds: 3), () {
-          // _connection.start(); // Try reconnecting after a short delay
-          // _connectionStatusController.add("Reconnecting...");
-          reconnect();
-        });
-      });
+      _connection =
+          HubConnectionBuilder()
+              .withUrl(
+                options.serverUrl,
+                HttpConnectionOptions(
+                  transport: HttpTransportType.webSockets,
+                  skipNegotiation: true,
+                  accessTokenFactory: options.accessToken != null ? () async => options.accessToken! : null,
+                  logging: (level, message) => log('SignalR Log: $message'),
+                ),
+              )
+              .withAutomaticReconnect()
+              .build();
 
-      _connection.onreconnecting((error) {
-        // _connectionStatusController.add("Reconnecting...");
-        print("🔄 SignalR Reconnecting...");
-      });
+      _setupConnectionHandlers();
+      _setupMessageHandlers();
 
-      _connection.onreconnected((connectionId) {
-        Future.delayed(Duration(milliseconds: 500), () {
-          _connectionStatusController.add("Online");
-        });
-        print("✅ SignalR Reconnected!");
-      });
-
-      _connection.on("CheckConnection", (args) {
-        print("✅ Received CheckConnection event.");
-        Future.delayed(Duration(milliseconds: 500), () {
-          _connectionStatusController
-              .add("Online"); // Ensure it's updated AFTER start()
-        });
-      });
-
-      // Listen for incoming messages
-      _connection.on("ReceiveMessage", (List<Object?>? arguments) {
-        if (arguments != null && arguments.isNotEmpty) {
-          String sender =
-              arguments[0] is String ? arguments[0] as String : "Unknown";
-          String message = arguments.length > 1 && arguments[1] is String
-              ? arguments[1] as String
-              : "No message";
-
-          print("📩 Message received from $sender: $message");
-
-          // 🔹 Convert Map to JSON string
-          _messageStreamController
-              .add(jsonEncode({"sender": sender, "message": message}));
-        }
-      });
-
-      print("🔄 Connecting to SignalR...");
-      try {
-        await _connection.start();
-        Future.delayed(Duration(milliseconds: 500), () {
-          _connectionStatusController
-              .add("Online"); // Ensure it's updated AFTER start()
-        });
-        await checkConnection(); // 🔹 Ensure this runs
-        print("✅ SignalR Connected!!!");
-      } catch (e) {
-        _connectionStatusController.add("Connection Failed");
-        print("❌ SignalR Connection Error: $e");
-      }
+      await _connection.start();
       _isInitialized = true;
-      print("✅ SignalR Connected!");
+      _connectionStateController.add(ConnectionStatus.connected);
     } catch (e, stackTrace) {
-      print("❌ SignalR Connection Error: ${e.runtimeType} - ${e.toString()}");
-      print(stackTrace);
+      _connectionStateController.add(ConnectionStatus.disconnected);
+      _errorStreamController.add('Initialization error: $e\n$stackTrace');
+      rethrow;
     }
   }
 
-  /// Send a message
-  Future<void> sendMessage(String user, String message) async {
-    if (!_isInitialized || _connection.state != HubConnectionState.connected) {
-      print("⚠️ Cannot send message, SignalR not connected!");
+  void _setupConnectionHandlers() {
+    _connection.onclose((error) {
+      _connectionStateController.add(ConnectionStatus.disconnected);
+      if (_options?.autoReconnect ?? false) {
+        reconnect();
+      }
+    });
+
+    _connection.onreconnecting((error) {
+      _connectionStateController.add(ConnectionStatus.reconnecting);
+    });
+
+    _connection.onreconnected((connectionId) {
+      _connectionStateController.add(ConnectionStatus.connected);
+      _processMessageQueue();
+    });
+  }
+
+  void _setupMessageHandlers() {
+    _connection.on('ReceiveMessage', (List<Object?>? arguments) {
+      if (arguments != null && arguments.length >= 2) {
+        try {
+          final message = ChatMessage(
+            sender: arguments[0] as String,
+            content: arguments[1] as String,
+            messageId: arguments.length > 2 ? arguments[2] as String? : null,
+          );
+          _messageStreamController.add(message);
+        } catch (e) {
+          _errorStreamController.add('Error processing received message: $e');
+        }
+      }
+    });
+  }
+
+  Future<void> sendMessage(String sender, String content) async {
+    final message = ChatMessage(
+      sender: sender,
+      content: content,
+      messageId: DateTime.now().millisecondsSinceEpoch.toString(),
+    );
+
+    if (_connection.state != HubConnectionState.connected) {
+      _messageQueue.add(message);
+      _errorStreamController.add('Message queued for later delivery');
       return;
     }
+
     try {
-      print("📤 Sending message: $message");
-      await _connection.invoke("SendMessage", args: [user, message]);
-      print("✅ Message sent successfully.");
-    } catch (e, stackTrace) {
-      print("❌ Send Message Error: ${e.runtimeType} - ${e.toString()}");
-      print(stackTrace);
+      await _connection.invoke('SendMessage', args: [message.sender, message.content, message.messageId]);
+
+      final deliveredMessage = ChatMessage(
+        sender: message.sender,
+        content: message.content,
+        messageId: message.messageId,
+        status: MessageStatus.delivered,
+      );
+      _messageStreamController.add(deliveredMessage);
+    } catch (e) {
+      _messageQueue.add(message);
+      _errorStreamController.add('Failed to send message: $e');
+
+      final failedMessage = ChatMessage(
+        sender: message.sender,
+        content: message.content,
+        messageId: message.messageId,
+        status: MessageStatus.failed,
+      );
+      _messageStreamController.add(failedMessage);
     }
   }
 
-  /// Disconnect from SignalR
   Future<void> disconnect() async {
     if (_isInitialized) {
       await _connection.stop();
       _isInitialized = false;
-      print("🔌 SignalR Disconnected.");
+      _connectionStateController.add(ConnectionStatus.disconnected);
     }
   }
 
-  /// Dispose StreamController when not in use
+  Future<bool> clearMessageQueue() async {
+    _messageQueue.clear();
+    return true;
+  }
+
   void dispose() {
     _messageStreamController.close();
-    _connectionStatusController.close();
+    _connectionStateController.close();
+    _errorStreamController.close();
   }
 }
