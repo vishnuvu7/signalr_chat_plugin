@@ -1,205 +1,324 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:signalr_chat_plugin/signalr_chat_plugin.dart';
+import 'package:signalr_chat_plugin/signalr_plugin.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize SignalR plugin
-  SignalRChatPlugin chatPlugin = SignalRChatPlugin();
-  //await chatPlugin.initSignalR(serverUrl: "http://192.168.90.250:8080/chathub");
-
-  runApp(MyApp(chatPlugin: chatPlugin));
+  runApp(const ChatApp());
 }
 
-class MyApp extends StatelessWidget {
-  final SignalRChatPlugin chatPlugin;
-  MyApp({required this.chatPlugin});
+class ChatApp extends StatelessWidget {
+  const ChatApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: ChatScreen(chatPlugin: chatPlugin),
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      home: const ChatScreen(),
     );
   }
 }
 
 class ChatScreen extends StatefulWidget {
-  final SignalRChatPlugin chatPlugin;
-  ChatScreen({required this.chatPlugin});
+  const ChatScreen({super.key});
 
   @override
-  _ChatScreenState createState() => _ChatScreenState();
+  State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final List<Map<String, String>> _messages = [];
-  String _connectionStatus = "Connecting..."; // 🔹 Default status
+  final ScrollController _scrollController = ScrollController();
+  final SignalRChatPlugin _chatPlugin = SignalRChatPlugin();
+  final List<ChatMessage> _messages = [];
+  late String _username;
+  ConnectionStatus _connectionState = ConnectionStatus.connecting;
 
   @override
   void initState() {
     super.initState();
-
-    // 🔹 Listen for connection status changes
-    widget.chatPlugin
-        .initSignalR(serverUrl: "http://your-chathub-url/chathub")
-        .then((_) {
-      widget.chatPlugin.connectionStatusStream.listen((status) {
-        print("🔄 main.dart Connection Status: $status");
-        setState(() {
-          _connectionStatus = status; // Update UI
-        });
-      });
-    });
-
-    // Listen to incoming messages from SignalR
-    widget.chatPlugin.messagesStream.listen((data) {
-      print("📩 Message received: $data");
-
-      try {
-        Map<String, dynamic> decodedData =
-            jsonDecode(data); // 🔹 Decode JSON string
-
-        setState(() {
-          _messages.insert(0, {
-            "sender": decodedData["sender"] ?? "Unknown",
-            "message": decodedData["message"] ?? "No message"
-          }); // ✅ Add message properly
-        });
-
-        print("✅ Updated messages list: $_messages");
-      } catch (e) {
-        print("❌ Error decoding message: $e");
-      }
-    });
+    _initializeChat();
   }
 
-  void _sendMessage() {
-    if (_messageController.text.trim().isEmpty) return;
+  Future<void> _initializeChat() async {
+    // Initialize SignalR with configuration
+    await _chatPlugin.initSignalR(
+      SignalRConnectionOptions(
+        serverUrl: 'http://your-server/chathub',
+        reconnectInterval: const Duration(seconds: 3),
+        maxRetryAttempts: 5,
+        autoReconnect: true,
+        onError: _handleError,
+      ),
+    );
 
-    String message = _messageController.text.trim();
-    String userName = "User1"; // Replace with the actual user
+    // Set a random username for demo purposes
+    _username = 'User${DateTime.now().millisecondsSinceEpoch % 1000}';
 
-    widget.chatPlugin.sendMessage(userName, message);
+    // Listen to messages
+    _chatPlugin.messagesStream.listen(_handleNewMessage);
 
+    // Listen to connection state changes
+    _chatPlugin.connectionStateStream.listen(_handleConnectionState);
+
+    // Listen to errors
+    _chatPlugin.errorStream.listen(_handleError);
+  }
+
+  void _handleNewMessage(ChatMessage message) {
     setState(() {
-      _messages.insert(0, {"sender": "You", "message": message});
+      _messages.insert(0, message);
+    });
+    _scrollToBottom();
+  }
+
+  void _handleConnectionState(ConnectionStatus state) {
+    setState(() {
+      _connectionState = state;
     });
 
-    _messageController.clear(); // Clear input field after sending
+    String message;
+    Color backgroundColor;
+
+    switch (state) {
+      case ConnectionStatus.connected:
+        message = 'Connected to chat';
+        backgroundColor = Colors.green;
+        break;
+      case ConnectionStatus.connecting:
+        message = 'Connecting to chat...';
+        backgroundColor = Colors.orange;
+        break;
+      case ConnectionStatus.reconnecting:
+        message = 'Reconnecting...';
+        backgroundColor = Colors.orange;
+        break;
+      case ConnectionStatus.disconnected:
+        message = 'Disconnected from chat';
+        backgroundColor = Colors.red;
+        break;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: backgroundColor,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _handleError(String error) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error: $error'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  Future<void> _sendMessage() async {
+    final message = _messageController.text.trim();
+    if (message.isEmpty) return;
+
+    _messageController.clear();
+    await _chatPlugin.sendMessage(_username, message);
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  Widget _buildConnectionStatus() {
+    Color color;
+    IconData icon;
+    String text;
+
+    switch (_connectionState) {
+      case ConnectionStatus.connected:
+        color = Colors.green;
+        icon = Icons.cloud_done;
+        text = 'Connected';
+        break;
+      case ConnectionStatus.connecting:
+        color = Colors.orange;
+        icon = Icons.cloud_upload;
+        text = 'Connecting';
+        break;
+      case ConnectionStatus.reconnecting:
+        color = Colors.orange;
+        icon = Icons.cloud_upload;
+        text = 'Reconnecting';
+        break;
+      case ConnectionStatus.disconnected:
+        color = Colors.red;
+        icon = Icons.cloud_off;
+        text = 'Disconnected';
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(color: color, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageItem(ChatMessage message) {
+    final isMyMessage = message.sender == _username;
+
+    return Align(
+      alignment: isMyMessage ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isMyMessage ? Colors.blue : Colors.grey[300],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            Text(
+              message.sender,
+              style: TextStyle(
+                fontSize: 12,
+                color: isMyMessage ? Colors.white70 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              message.content,
+              style: TextStyle(
+                color: isMyMessage ? Colors.white : Colors.black,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _formatTime(message.timestamp),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isMyMessage ? Colors.white70 : Colors.black54,
+                  ),
+                ),
+                if (isMyMessage) ...[
+                  const SizedBox(width: 4),
+                  _buildMessageStatus(message.status),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageStatus(MessageStatus status) {
+    IconData icon;
+    Color color;
+
+    switch (status) {
+      case MessageStatus.sent:
+        icon = Icons.check;
+        color = Colors.white70;
+        break;
+      case MessageStatus.delivered:
+        icon = Icons.done_all;
+        color = Colors.white;
+        break;
+      case MessageStatus.failed:
+        icon = Icons.error_outline;
+        color = Colors.red[300]!;
+        break;
+    }
+
+    return Icon(icon, size: 14, color: color);
+  }
+
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Tamimah Chat ($_connectionStatus)",
-              style: TextStyle(fontSize: 15),
-            ),
-            Text(
-              "Status $_connectionStatus", // 🔹 Show live connection status
-              style: TextStyle(fontSize: 12, color: Colors.white70),
-            ),
-          ],
-        ),
+        title: const Text('SignalR Chat'),
+        actions: [_buildConnectionStatus()],
       ),
       body: Column(
         children: [
           Expanded(
-            child: StreamBuilder<String>(
-              stream: widget.chatPlugin.messagesStream,
-              builder: (context, snapshot) {
-                return ListView.builder(
-                  reverse: true, // Show newest messages at the bottom
-                  padding: EdgeInsets.all(10),
-                  itemCount: _messages.length,
-                  itemBuilder: (context, index) {
-                    final messageData = _messages[index];
-                    final sender = messageData["sender"] ?? "Unknown";
-                    final message = messageData["message"] ?? "";
-
-                    return Align(
-                      alignment: sender == "You"
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        padding: EdgeInsets.all(12),
-                        margin: EdgeInsets.symmetric(vertical: 5),
-                        decoration: BoxDecoration(
-                          color: sender == "You"
-                              ? Colors.blueAccent
-                              : Colors.grey[300],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: sender == "You"
-                              ? CrossAxisAlignment.end
-                              : CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              sender, // Show username
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: sender == "You"
-                                    ? Colors.white
-                                    : Colors.black,
-                              ),
-                            ),
-                            SizedBox(height: 5),
-                            Text(
-                              message, // Show message text
-                              style: TextStyle(
-                                color: sender == "You"
-                                    ? Colors.white
-                                    : Colors.black,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
+            child: ListView.builder(
+              controller: _scrollController,
+              reverse: true,
+              itemCount: _messages.length,
+              itemBuilder: (context, index) => _buildMessageItem(_messages[index]),
             ),
           ),
-          _buildMessageInput(),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    decoration: InputDecoration(
+                      hintText: 'Type a message...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                    onSubmitted: (_) => _sendMessage(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FloatingActionButton(
+                  onPressed: _sendMessage,
+                  child: const Icon(Icons.send),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildMessageInput() {
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                hintText: "Type a message...",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 15),
-              ),
-            ),
-          ),
-          SizedBox(width: 10),
-          ElevatedButton(
-            onPressed: _sendMessage,
-            child: Icon(Icons.send),
-          ),
-        ],
-      ),
-    );
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    _chatPlugin.dispose();
+    super.dispose();
   }
 }
