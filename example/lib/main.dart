@@ -33,7 +33,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final SignalRChatPlugin _chatPlugin = SignalRChatPlugin();
+  final SignalrChatPlugin _chatPlugin = SignalrChatPlugin();
   final List<ChatMessage> _messages = [];
   final Set<String> _processedMessageIds = {};
   late String _username;
@@ -50,7 +50,7 @@ class _ChatScreenState extends State<ChatScreen> {
       developer.log('Initializing SignalR connection...');
 
       // Initialize SignalR with configuration
-      await _chatPlugin.initSignalR(
+      await _chatPlugin.initializeSignalR(
         SignalRConnectionOptions(
           serverUrl: 'http://your-server/chathub',
           reconnectInterval: const Duration(seconds: 3),
@@ -79,7 +79,7 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       // Listen to connection state changes
-      _chatPlugin.connectionStateStream.listen(
+      _chatPlugin.connectionStatusStream.listen(
         (state) {
           developer.log('Connection state changed to: $state');
           _handleConnectionState(state);
@@ -495,7 +495,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    _chatPlugin.dispose();
+    _chatPlugin.disconnect();
     _processedMessageIds.clear();
     super.dispose();
   }
