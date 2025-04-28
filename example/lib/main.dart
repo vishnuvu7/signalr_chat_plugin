@@ -44,28 +44,82 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _initializeChat() async {
-    // Initialize SignalR with configuration
-    await _chatPlugin.initSignalR(
-      SignalRConnectionOptions(
-        serverUrl: 'http://your-server/chathub',
-        reconnectInterval: const Duration(seconds: 3),
-        maxRetryAttempts: 5,
-        autoReconnect: true,
-        onError: _handleError,
-      ),
-    );
+    try {
+      print('Initializing SignalR connection...');
 
-    // Set a random username for demo purposes
-    _username = 'User${DateTime.now().millisecondsSinceEpoch % 1000}';
+      // Initialize SignalR with configuration
+      await _chatPlugin.initSignalR(
+        SignalRConnectionOptions(
+          serverUrl: 'https://wpr.intertoons.net/cloudsanadchatbot/myhub',
+          reconnectInterval: const Duration(seconds: 3),
+          maxRetryAttempts: 5,
+          autoReconnect: true,
+          onError: (error) {
+            print('SignalR error: $error');
+            _handleError(error);
+          },
+        ),
+      );
 
-    // Listen to messages
-    _chatPlugin.messagesStream.listen(_handleNewMessage);
+      print('SignalR initialized, setting up listeners...');
 
-    // Listen to connection state changes
-    _chatPlugin.connectionStateStream.listen(_handleConnectionState);
+      // Set a random username for demo purposes
+      _username = 'User${DateTime.now().millisecondsSinceEpoch % 1000}';
+      print('Username set to: $_username');
 
-    // Listen to errors
-    _chatPlugin.errorStream.listen(_handleError);
+      // Listen to messages
+      _chatPlugin.messagesStream.listen(
+        _handleNewMessage,
+        onError: (error) {
+          print('Message stream error: $error');
+          _handleError(error.toString());
+        },
+      );
+
+      // Listen to connection state changes
+      _chatPlugin.connectionStateStream.listen(
+        (state) {
+          print('Connection state changed to: $state');
+          _handleConnectionState(state);
+        },
+        onError: (error) {
+          print('Connection state stream error: $error');
+          _handleError(error.toString());
+        },
+      );
+
+      // Listen to errors
+      _chatPlugin.errorStream.listen(
+        (error) {
+          print('Error stream received: $error');
+          _handleError(error);
+        },
+        onError: (error) {
+          print('Error stream error: $error');
+          _handleError(error.toString());
+        },
+      );
+
+      // Explicitly set the connection state to connected since we know the connection is established
+      if (mounted) {
+        setState(() {
+          _connectionState = ConnectionStatus.connected;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Connected to chat'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      print('All listeners set up successfully');
+    } catch (e, stackTrace) {
+      print('Error initializing chat: $e');
+      print('Stack trace: $stackTrace');
+      _handleError('Failed to initialize chat: $e');
+    }
   }
 
   void _handleNewMessage(ChatMessage message) {
@@ -76,6 +130,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleConnectionState(ConnectionStatus state) {
+    print('Handling connection state: $state');
+    if (!mounted) return;
+
     setState(() {
       _connectionState = state;
     });
@@ -102,13 +159,16 @@ class _ChatScreenState extends State<ChatScreen> {
         break;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: backgroundColor,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    print('Showing connection state snackbar: $message');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: backgroundColor,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _handleError(String error) {
@@ -124,8 +184,47 @@ class _ChatScreenState extends State<ChatScreen> {
     final message = _messageController.text.trim();
     if (message.isEmpty) return;
 
-    _messageController.clear();
-    await _chatPlugin.sendMessage(_username, message);
+    try {
+      print('Attempting to send message: $message');
+      _messageController.clear();
+
+      // Log the current connection state
+      print('Current connection state: $_connectionState');
+
+      // Check if we're connected before sending
+      if (_connectionState != ConnectionStatus.connected) {
+        print('Cannot send message: Not connected to server');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot send message: Not connected to server'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Try to send the message
+      await _chatPlugin.sendMessage(_username, message);
+      print('Message sent successfully');
+    } catch (e, stackTrace) {
+      print('Error sending message: $e');
+      print('Stack trace: $stackTrace');
+
+      String errorMessage = 'Failed to send message';
+      if (e.toString().contains('SendMessage')) {
+        errorMessage =
+            'Server rejected the message. Please check the message format.';
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _scrollToBottom() {
@@ -199,7 +298,8 @@ class _ChatScreenState extends State<ChatScreen> {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
-          crossAxisAlignment: isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Text(
               message.sender,
@@ -278,7 +378,8 @@ class _ChatScreenState extends State<ChatScreen> {
               controller: _scrollController,
               reverse: true,
               itemCount: _messages.length,
-              itemBuilder: (context, index) => _buildMessageItem(_messages[index]),
+              itemBuilder: (context, index) =>
+                  _buildMessageItem(_messages[index]),
             ),
           ),
           Padding(
