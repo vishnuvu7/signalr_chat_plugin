@@ -1,98 +1,175 @@
 # SignalR Chat Plugin for Flutter
 
-A Flutter plugin that provides SignalR chat functionality for both Android and iOS platforms.
+A Flutter plugin that provides real-time chat functionality using SignalR. This plugin offers a robust, feature-rich implementation for real-time messaging in Flutter applications with automatic reconnection handling, message queuing, and connection state management.
 
 ## Features
 
-- Connect to SignalR hub
-- Send and receive messages
-- Handle user join/leave events
-- Automatic reconnection
-- Cross-platform support (Android & iOS)
+- 🔄 Real-time bi-directional communication
+- 📱 Cross-platform support (iOS, Android, Web)
+- 🔐 Secure WebSocket connections with optional authentication
+- 🔁 Automatic reconnection handling
+- 📤 Message queuing for offline/disconnected scenarios
+- 📊 Connection state management and monitoring
+- 🚦 Comprehensive error handling and reporting
+- 📨 Message delivery status tracking
 
-## Installation
+## Getting Started
 
-Add the following to your `pubspec.yaml`:
+### Installation
+
+Add this to your package's `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  signalr_chat_plugin:
-    git:
-      url: https://github.com/yourusername/signalr_chat_plugin.git
-      ref: main
+  signalr_chat_plugin: ^1.0.0
 ```
 
-## Usage
+### Basic Usage
 
-### Initialize the plugin
+1. Initialize the plugin with your SignalR hub URL:
 
 ```dart
-import 'package:signalr_chat_plugin/signalr_chat_plugin.dart';
+final chatPlugin = SignalRChatPlugin();
 
-final SignalrChatPlugin _signalrChatPlugin = SignalrChatPlugin();
-
-// Initialize the connection
-await _signalrChatPlugin.initialize('https://your-signalr-hub-url.com/chat');
+await chatPlugin.initSignalR(
+  SignalRConnectionOptions(
+    serverUrl: 'https://your-server.com/chathub',
+    accessToken: 'optional-auth-token',
+  ),
+);
 ```
 
-### Send a message
+2. Listen for incoming messages:
 
 ```dart
-await _signalrChatPlugin.sendMessage('Hello, world!');
+chatPlugin.messagesStream.listen((message) {
+  print('Received message from ${message.sender}: ${message.content}');
+});
 ```
 
-### Listen to events
+3. Send messages:
 
 ```dart
-_signalrChatPlugin.onEvent.listen((event) {
-  switch (event['type']) {
-    case 'message':
-      print('Received message: ${event['message']}');
+await chatPlugin.sendMessage('user123', 'Hello, world!');
+```
+
+### Connection State Management
+
+Monitor the connection state:
+
+```dart
+chatPlugin.connectionStateStream.listen((status) {
+  switch (status) {
+    case ConnectionStatus.connected:
+      print('Connected to the chat server');
       break;
-    case 'userJoined':
-      print('User joined: ${event['username']}');
+    case ConnectionStatus.disconnected:
+      print('Disconnected from the chat server');
       break;
-    case 'userLeft':
-      print('User left: ${event['username']}');
+    case ConnectionStatus.reconnecting:
+      print('Attempting to reconnect...');
       break;
-    case 'connectionStatus':
-      print('Connection status: ${event['status']}');
+    case ConnectionStatus.connecting:
+      print('Establishing initial connection...');
       break;
   }
 });
 ```
 
-### Disconnect
+### Error Handling
+
+Listen for errors:
 
 ```dart
-await _signalrChatPlugin.disconnect();
+chatPlugin.errorStream.listen((error) {
+  print('Error occurred: $error');
+});
 ```
 
-## Platform Setup
+### Advanced Configuration
 
-### Android
+Configure the connection with advanced options:
 
-No additional setup required. The plugin automatically adds the necessary SignalR dependencies.
+```dart
+final options = SignalRConnectionOptions(
+  serverUrl: 'https://your-server.com/chathub',
+  accessToken: 'your-auth-token',
+  reconnectInterval: Duration(seconds: 5),
+  maxRetryAttempts: 5,
+  autoReconnect: true,
+  useSecureConnection: true,
+  onError: (error) => print('Connection error: $error'),
+);
 
-### iOS
-
-1. Add the following to your `ios/Podfile`:
-
-```ruby
-platform :ios, '9.0'
+await chatPlugin.initSignalR(options);
 ```
 
-2. Run `pod install` in the `ios` directory.
+### Message Structure
+
+The plugin uses a `ChatMessage` class to handle messages:
+
+```dart
+final message = ChatMessage(
+  sender: 'user123',
+  content: 'Hello!',
+  messageId: 'unique-id',  // Optional
+  status: MessageStatus.sent,  // sent, delivered, or failed
+);
+```
+
+## Features Detail
+
+### Automatic Reconnection
+- Configurable retry attempts and intervals
+- Automatic message queue processing upon reconnection
+- Connection state monitoring
+
+### Message Queuing
+- Automatic queuing of messages during disconnection
+- Guaranteed message delivery attempt when connection is restored
+- Message status tracking (sent, delivered, failed)
+
+### Security
+- Secure WebSocket connections
+- Optional authentication token support
+- HTTPS/WSS protocol support
 
 ## Error Handling
 
-The plugin provides error handling through the event stream. Common errors include:
-
+The plugin provides comprehensive error handling:
 - Connection failures
-- Message sending failures
-- Disconnection errors
+- Message delivery failures
+- Server disconnections
+- Authentication errors
 
-Check the event stream for error messages and handle them appropriately in your application.
+## API Reference
+
+### Main Classes
+
+#### SignalRChatPlugin
+- `initSignalR(SignalRConnectionOptions options)`: Initialize the chat connection
+- `sendMessage(String sender, String content)`: Send a chat message
+- `disconnect()`: Disconnect from the server
+- `reconnect()`: Manually trigger reconnection
+- `clearMessageQueue()`: Clear pending messages
+- `dispose()`: Clean up resources
+
+#### SignalRConnectionOptions
+- `serverUrl`: SignalR hub URL
+- `accessToken`: Optional authentication token
+- `reconnectInterval`: Time between reconnection attempts
+- `maxRetryAttempts`: Maximum reconnection attempts
+- `autoReconnect`: Enable/disable automatic reconnection
+- `useSecureConnection`: Enable/disable WSS/HTTPS
+
+#### Streams
+- `messagesStream`: Receive incoming messages
+- `connectionStateStream`: Monitor connection state
+- `errorStream`: Listen for errors
+
+## Contributing
+
+Contributions are welcome! Please read our contributing guidelines before submitting pull requests.
 
 ## License
 
