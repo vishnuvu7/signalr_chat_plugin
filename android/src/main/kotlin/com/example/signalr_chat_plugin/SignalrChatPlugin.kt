@@ -7,7 +7,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 
-class SignalRChatPlugin: FlutterPlugin, MethodCallHandler {
+class SignalrChatPlugin: FlutterPlugin, MethodCallHandler {
   private lateinit var channel: MethodChannel
 
   override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
