@@ -171,10 +171,21 @@ class SignalRChatPlugin {
     }
 
     try {
-      await _connection.invoke(
-        'SendMessage',
-        args: [message.sender, message.content, message.messageId],
-      );
+      // Try different method names and parameter formats that might be expected by the server
+      try {
+        // First try with the original format
+        await _connection.invoke(
+          'SendMessage',
+          args: [message.sender, message.content, message.messageId],
+        );
+      } catch (e) {
+        print('First attempt failed, trying alternative format...');
+        // Try with just sender and content
+        await _connection.invoke(
+          'SendMessage',
+          args: [message.sender, message.content],
+        );
+      }
 
       final deliveredMessage = ChatMessage(
         sender: message.sender,
@@ -184,6 +195,7 @@ class SignalRChatPlugin {
       );
       _messageStreamController.add(deliveredMessage);
     } catch (e) {
+      print('Error sending message: $e');
       _messageQueue.add(message);
       _errorStreamController.add('Failed to send message: $e');
 
