@@ -47,7 +47,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Initialize SignalR with configuration
     await _chatPlugin.initSignalR(
       SignalRConnectionOptions(
-        serverUrl: 'http://your-server/chathub',
+        serverUrl: 'https://wpr.intertoons.net/cloudsanadchatbot/myhub',
         reconnectInterval: const Duration(seconds: 3),
         maxRetryAttempts: 5,
         autoReconnect: true,
@@ -199,7 +199,8 @@ class _ChatScreenState extends State<ChatScreen> {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
-          crossAxisAlignment: isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Text(
               message.sender,
@@ -278,7 +279,8 @@ class _ChatScreenState extends State<ChatScreen> {
               controller: _scrollController,
               reverse: true,
               itemCount: _messages.length,
-              itemBuilder: (context, index) => _buildMessageItem(_messages[index]),
+              itemBuilder: (context, index) =>
+                  _buildMessageItem(_messages[index]),
             ),
           ),
           Padding(

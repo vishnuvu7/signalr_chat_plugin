@@ -13,15 +13,19 @@ class SignalRChatPlugin {
   int _retryCount = 0;
   final List<ChatMessage> _messageQueue = [];
 
-  final StreamController<ChatMessage> _messageStreamController = StreamController.broadcast();
+  final StreamController<ChatMessage> _messageStreamController =
+      StreamController.broadcast();
 
   Stream<ChatMessage> get messagesStream => _messageStreamController.stream;
 
-  final StreamController<ConnectionStatus> _connectionStateController = StreamController.broadcast();
+  final StreamController<ConnectionStatus> _connectionStateController =
+      StreamController.broadcast();
 
-  Stream<ConnectionStatus> get connectionStateStream => _connectionStateController.stream;
+  Stream<ConnectionStatus> get connectionStateStream =>
+      _connectionStateController.stream;
 
-  final StreamController<String> _errorStreamController = StreamController.broadcast();
+  final StreamController<String> _errorStreamController =
+      StreamController.broadcast();
 
   Stream<String> get errorStream => _errorStreamController.stream;
 
@@ -36,7 +40,8 @@ class SignalRChatPlugin {
   Future<void> _processMessageQueue() async {
     if (_messageQueue.isEmpty) return;
 
-    while (_messageQueue.isNotEmpty && _connection.state == HubConnectionState.connected) {
+    while (_messageQueue.isNotEmpty &&
+        _connection.state == HubConnectionState.connected) {
       final message = _messageQueue.first;
       try {
         await sendMessage(message.sender, message.content);
@@ -51,7 +56,8 @@ class SignalRChatPlugin {
   Future<void> reconnect() async {
     if (_options == null || !_options!.autoReconnect) return;
 
-    while (_connection.state != HubConnectionState.connected && _retryCount < _options!.maxRetryAttempts) {
+    while (_connection.state != HubConnectionState.connected &&
+        _retryCount < _options!.maxRetryAttempts) {
       try {
         _connectionStateController.add(ConnectionStatus.reconnecting);
         await _connection.start();
@@ -61,7 +67,9 @@ class SignalRChatPlugin {
         break;
       } catch (e) {
         _retryCount++;
-        _errorStreamController.add('Reconnection attempt $_retryCount failed: $e');
+        _errorStreamController.add(
+          'Reconnection attempt $_retryCount failed: $e',
+        );
         if (_retryCount < _options!.maxRetryAttempts) {
           await Future.delayed(_options!.reconnectInterval);
         }
@@ -91,7 +99,10 @@ class SignalRChatPlugin {
                 HttpConnectionOptions(
                   transport: HttpTransportType.webSockets,
                   skipNegotiation: true,
-                  accessTokenFactory: options.accessToken != null ? () async => options.accessToken! : null,
+                  accessTokenFactory:
+                      options.accessToken != null
+                          ? () async => options.accessToken!
+                          : null,
                   logging: (level, message) => log('SignalR Log: $message'),
                 ),
               )
@@ -160,7 +171,10 @@ class SignalRChatPlugin {
     }
 
     try {
-      await _connection.invoke('SendMessage', args: [message.sender, message.content, message.messageId]);
+      await _connection.invoke(
+        'SendMessage',
+        args: [message.sender, message.content, message.messageId],
+      );
 
       final deliveredMessage = ChatMessage(
         sender: message.sender,

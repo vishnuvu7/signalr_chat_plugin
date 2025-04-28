@@ -1,0 +1,2 @@
+/Volumes/Works/FLUTTER_PROJECTS/signalr_chat_plugin/example/android/app/.cxx/Debug/4k282e3v/arm64-v8a/CMakeFiles/edit_cache.dir
+/Volumes/Works/FLUTTER_PROJECTS/signalr_chat_plugin/example/android/app/.cxx/Debug/4k282e3v/arm64-v8a/CMakeFiles/rebuild_cache.dir
