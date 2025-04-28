@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:signalr_chat_plugin/signalr_plugin.dart';
+import 'dart:developer' as developer;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,7 +46,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _initializeChat() async {
     try {
-      print('Initializing SignalR connection...');
+      developer.log('Initializing SignalR connection...');
 
       // Initialize SignalR with configuration
       await _chatPlugin.initSignalR(
@@ -55,23 +56,23 @@ class _ChatScreenState extends State<ChatScreen> {
           maxRetryAttempts: 5,
           autoReconnect: true,
           onError: (error) {
-            print('SignalR error: $error');
+            developer.log('SignalR error: $error');
             _handleError(error);
           },
         ),
       );
 
-      print('SignalR initialized, setting up listeners...');
+      developer.log('SignalR initialized, setting up listeners...');
 
       // Set a random username for demo purposes
       _username = 'User${DateTime.now().millisecondsSinceEpoch % 1000}';
-      print('Username set to: $_username');
+      developer.log('Username set to: $_username');
 
       // Listen to messages
       _chatPlugin.messagesStream.listen(
         _handleNewMessage,
         onError: (error) {
-          print('Message stream error: $error');
+          developer.log('Message stream error: $error');
           _handleError(error.toString());
         },
       );
@@ -79,11 +80,11 @@ class _ChatScreenState extends State<ChatScreen> {
       // Listen to connection state changes
       _chatPlugin.connectionStateStream.listen(
         (state) {
-          print('Connection state changed to: $state');
+          developer.log('Connection state changed to: $state');
           _handleConnectionState(state);
         },
         onError: (error) {
-          print('Connection state stream error: $error');
+          developer.log('Connection state stream error: $error');
           _handleError(error.toString());
         },
       );
@@ -91,11 +92,11 @@ class _ChatScreenState extends State<ChatScreen> {
       // Listen to errors
       _chatPlugin.errorStream.listen(
         (error) {
-          print('Error stream received: $error');
+          developer.log('Error stream received: $error');
           _handleError(error);
         },
         onError: (error) {
-          print('Error stream error: $error');
+          developer.log('Error stream error: $error');
           _handleError(error.toString());
         },
       );
@@ -114,10 +115,10 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
 
-      print('All listeners set up successfully');
+      developer.log('All listeners set up successfully');
     } catch (e, stackTrace) {
-      print('Error initializing chat: $e');
-      print('Stack trace: $stackTrace');
+      developer.log('Error initializing chat: $e');
+      developer.log('Stack trace: $stackTrace');
       _handleError('Failed to initialize chat: $e');
     }
   }
@@ -130,7 +131,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleConnectionState(ConnectionStatus state) {
-    print('Handling connection state: $state');
+    developer.log('Handling connection state: $state');
     if (!mounted) return;
 
     setState(() {
@@ -159,7 +160,7 @@ class _ChatScreenState extends State<ChatScreen> {
         break;
     }
 
-    print('Showing connection state snackbar: $message');
+    developer.log('Showing connection state snackbar: $message');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -185,15 +186,15 @@ class _ChatScreenState extends State<ChatScreen> {
     if (message.isEmpty) return;
 
     try {
-      print('Attempting to send message: $message');
+      developer.log('Attempting to send message: $message');
       _messageController.clear();
 
       // Log the current connection state
-      print('Current connection state: $_connectionState');
+      developer.log('Current connection state: $_connectionState');
 
       // Check if we're connected before sending
       if (_connectionState != ConnectionStatus.connected) {
-        print('Cannot send message: Not connected to server');
+        developer.log('Cannot send message: Not connected to server');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Cannot send message: Not connected to server'),
@@ -205,10 +206,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Try to send the message
       await _chatPlugin.sendMessage(_username, message);
-      print('Message sent successfully');
+      developer.log('Message sent successfully');
     } catch (e, stackTrace) {
-      print('Error sending message: $e');
-      print('Stack trace: $stackTrace');
+      developer.log('Error sending message: $e');
+      developer.log('Stack trace: $stackTrace');
 
       String errorMessage = 'Failed to send message';
       if (e.toString().contains('SendMessage')) {
