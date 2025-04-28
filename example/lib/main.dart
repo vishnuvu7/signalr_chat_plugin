@@ -35,6 +35,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final SignalRChatPlugin _chatPlugin = SignalRChatPlugin();
   final List<ChatMessage> _messages = [];
+  final Set<String> _processedMessageIds = {};
   late String _username;
   ConnectionStatus _connectionState = ConnectionStatus.connecting;
 
@@ -51,7 +52,7 @@ class _ChatScreenState extends State<ChatScreen> {
       // Initialize SignalR with configuration
       await _chatPlugin.initSignalR(
         SignalRConnectionOptions(
-          serverUrl: 'https://wpr.intertoons.net/cloudsanadchatbot/myhub',
+          serverUrl: 'http://your-server/chathub',
           reconnectInterval: const Duration(seconds: 3),
           maxRetryAttempts: 5,
           autoReconnect: true,
@@ -123,8 +124,66 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // void _handleNewMessage(ChatMessage message) {
+  //   // Skip if we've already processed this message
+  //   if (message.messageId != null &&
+  //       _processedMessageIds.contains(message.messageId)) {
+  //     developer.log('Skipping duplicate message: ${message.messageId}');
+  //     return;
+  //   }
+
+  //   // Add message ID to processed set
+  //   if (message.messageId != null) {
+  //     _processedMessageIds.add(message.messageId!);
+  //   }
+
+  //   setState(() {
+  //     // If this is our own message, update the existing message instead of adding a new one
+  //     if (message.sender == _username) {
+  //       final index =
+  //           _messages.indexWhere((m) => m.messageId == message.messageId);
+  //       if (index != -1) {
+  //         _messages[index] = message;
+  //       } else {
+  //         _messages.insert(0, message);
+  //       }
+  //     } else {
+  //       _messages.insert(0, message);
+  //     }
+  //   });
+  //   _scrollToBottom();
+  // }
+
+// Option 1: Fixed handleNewMessage to better detect and handle duplicates
   void _handleNewMessage(ChatMessage message) {
+    // Skip if we've already processed this message by ID
+    if (message.messageId != null &&
+        _processedMessageIds.contains(message.messageId)) {
+      developer.log('Skipping duplicate message by ID: ${message.messageId}');
+      return;
+    }
+
+    // Add message ID to processed set if it has one
+    if (message.messageId != null) {
+      _processedMessageIds.add(message.messageId!);
+    }
+
     setState(() {
+      // If this is our own message, check if we already have a similar message in the list
+      if (message.sender == _username) {
+        // Look for an existing message with the same content from the same sender
+        final existingMsgIndex = _messages.indexWhere(
+            (m) => m.sender == _username && m.content == message.content);
+
+        if (existingMsgIndex != -1) {
+          // Update the existing message status if needed
+          _messages[existingMsgIndex] = message;
+          developer.log('Updated existing message instead of adding duplicate');
+          return;
+        }
+      }
+
+      // If not our message or no existing message found, add as new
       _messages.insert(0, message);
     });
     _scrollToBottom();
@@ -203,6 +262,22 @@ class _ChatScreenState extends State<ChatScreen> {
         );
         return;
       }
+
+      // Create a temporary message to show in UI while sending
+      final messageId = DateTime.now().millisecondsSinceEpoch.toString();
+      final tempMessage = ChatMessage(
+        sender: _username,
+        content: message,
+        messageId: messageId,
+        status: MessageStatus.sent,
+      );
+
+      // Add the temporary message to UI
+      setState(() {
+        _messages.insert(0, tempMessage);
+        _processedMessageIds.add(messageId);
+      });
+      _scrollToBottom();
 
       // Try to send the message
       await _chatPlugin.sendMessage(_username, message);
@@ -421,6 +496,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     _chatPlugin.dispose();
+    _processedMessageIds.clear();
     super.dispose();
   }
 }

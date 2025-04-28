@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:developer';
+import 'dart:developer' as developer;
 
 import 'package:signalr_core/signalr_core.dart';
 
@@ -103,7 +103,9 @@ class SignalRChatPlugin {
                       options.accessToken != null
                           ? () async => options.accessToken!
                           : null,
-                  logging: (level, message) => log('SignalR Log: $message'),
+                  logging:
+                      (level, message) =>
+                          developer.log('SignalR Log: $message'),
                 ),
               )
               .withAutomaticReconnect()
@@ -148,6 +150,7 @@ class SignalRChatPlugin {
             sender: arguments[0] as String,
             content: arguments[1] as String,
             messageId: arguments.length > 2 ? arguments[2] as String? : null,
+            status: MessageStatus.delivered,
           );
           _messageStreamController.add(message);
         } catch (e) {
@@ -179,7 +182,7 @@ class SignalRChatPlugin {
           args: [message.sender, message.content, message.messageId],
         );
       } catch (e) {
-        print('First attempt failed, trying alternative format...');
+        developer.log('First attempt failed, trying alternative format...');
         // Try with just sender and content
         await _connection.invoke(
           'SendMessage',
@@ -187,15 +190,10 @@ class SignalRChatPlugin {
         );
       }
 
-      final deliveredMessage = ChatMessage(
-        sender: message.sender,
-        content: message.content,
-        messageId: message.messageId,
-        status: MessageStatus.delivered,
-      );
-      _messageStreamController.add(deliveredMessage);
+      // Don't add the message to the stream here - let the server's response handle it
+      // The server will send back the message through the ReceiveMessage handler
     } catch (e) {
-      print('Error sending message: $e');
+      developer.log('Error sending message: $e');
       _messageQueue.add(message);
       _errorStreamController.add('Failed to send message: $e');
 
