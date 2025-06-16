@@ -12,6 +12,7 @@ class SignalRChatPlugin {
   bool _isInitialized = false;
   int _retryCount = 0;
   final List<ChatMessage> _messageQueue = [];
+  final Set<String> _joinedRooms = {};
 
   final StreamController<ChatMessage> _messageStreamController =
       StreamController.broadcast();
@@ -29,6 +30,11 @@ class SignalRChatPlugin {
 
   Stream<String> get errorStream => _errorStreamController.stream;
 
+  final StreamController<String> _roomStreamController =
+      StreamController.broadcast();
+
+  Stream<String> get roomStream => _roomStreamController.stream;
+
   SignalRConnectionOptions? _options;
 
   factory SignalRChatPlugin() {
@@ -44,7 +50,7 @@ class SignalRChatPlugin {
         _connection.state == HubConnectionState.connected) {
       final message = _messageQueue.first;
       try {
-        await sendMessage(message.sender, message.content);
+        await sendMessage(message.sender, message.content, roomId: message.roomId);
         _messageQueue.removeAt(0);
       } catch (e) {
         _errorStreamController.add('Failed to process queued message: $e');
@@ -144,12 +150,13 @@ class SignalRChatPlugin {
 
   void _setupMessageHandlers() {
     _connection.on('ReceiveMessage', (List<Object?>? arguments) {
-      if (arguments != null && arguments.length >= 2) {
+      if (arguments != null && arguments.length >= 3) {
         try {
           final message = ChatMessage(
             sender: arguments[0] as String,
             content: arguments[1] as String,
-            messageId: arguments.length > 2 ? arguments[2] as String? : null,
+            roomId: arguments[2] as String,
+            messageId: arguments.length > 3 ? arguments[3] as String? : null,
             status: MessageStatus.delivered,
           );
           _messageStreamController.add(message);
@@ -158,12 +165,55 @@ class SignalRChatPlugin {
         }
       }
     });
+
+    _connection.on('RoomJoined', (List<Object?>? arguments) {
+      if (arguments != null && arguments.isNotEmpty) {
+        final roomId = arguments[0] as String;
+        _joinedRooms.add(roomId);
+        _roomStreamController.add('Joined room: $roomId');
+      }
+    });
+
+    _connection.on('RoomLeft', (List<Object?>? arguments) {
+      if (arguments != null && arguments.isNotEmpty) {
+        final roomId = arguments[0] as String;
+        _joinedRooms.remove(roomId);
+        _roomStreamController.add('Left room: $roomId');
+      }
+    });
   }
 
-  Future<void> sendMessage(String sender, String content) async {
+  Future<void> joinRoom(String roomId) async {
+    if (!_isInitialized) {
+      throw Exception('SignalR not initialized');
+    }
+
+    try {
+      await _connection.invoke('JoinRoom', args: [roomId]);
+    } catch (e) {
+      _errorStreamController.add('Failed to join room: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> leaveRoom(String roomId) async {
+    if (!_isInitialized) {
+      throw Exception('SignalR not initialized');
+    }
+
+    try {
+      await _connection.invoke('LeaveRoom', args: [roomId]);
+    } catch (e) {
+      _errorStreamController.add('Failed to leave room: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> sendMessage(String sender, String content, {String? roomId}) async {
     final message = ChatMessage(
       sender: sender,
       content: content,
+      roomId: roomId,
       messageId: DateTime.now().millisecondsSinceEpoch.toString(),
     );
 
@@ -174,24 +224,20 @@ class SignalRChatPlugin {
     }
 
     try {
-      // Try different method names and parameter formats that might be expected by the server
-      try {
-        // First try with the original format
+      if (roomId != null) {
+        if (!_joinedRooms.contains(roomId)) {
+          throw Exception('Not joined to room: $roomId');
+        }
+        await _connection.invoke(
+          'SendMessageToRoom',
+          args: [message.sender, message.content, message.roomId, message.messageId],
+        );
+      } else {
         await _connection.invoke(
           'SendMessage',
           args: [message.sender, message.content, message.messageId],
         );
-      } catch (e) {
-        developer.log('First attempt failed, trying alternative format...');
-        // Try with just sender and content
-        await _connection.invoke(
-          'SendMessage',
-          args: [message.sender, message.content],
-        );
       }
-
-      // Don't add the message to the stream here - let the server's response handle it
-      // The server will send back the message through the ReceiveMessage handler
     } catch (e) {
       developer.log('Error sending message: $e');
       _messageQueue.add(message);
@@ -200,6 +246,7 @@ class SignalRChatPlugin {
       final failedMessage = ChatMessage(
         sender: message.sender,
         content: message.content,
+        roomId: message.roomId,
         messageId: message.messageId,
         status: MessageStatus.failed,
       );
@@ -224,5 +271,8 @@ class SignalRChatPlugin {
     _messageStreamController.close();
     _connectionStateController.close();
     _errorStreamController.close();
+    _roomStreamController.close();
   }
+
+  Set<String> get joinedRooms => Set.unmodifiable(_joinedRooms);
 }

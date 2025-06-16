@@ -4,6 +4,7 @@ class ChatMessage {
   final String content;
   final DateTime timestamp;
   final String? messageId;
+  final String? roomId;
   final MessageStatus status;
 
   ChatMessage({
@@ -11,6 +12,7 @@ class ChatMessage {
     required this.content,
     DateTime? timestamp,
     this.messageId,
+    this.roomId,
     this.status = MessageStatus.sent,
   }) : timestamp = timestamp ?? DateTime.now();
 
@@ -20,6 +22,7 @@ class ChatMessage {
       content: json['content'] as String,
       timestamp: DateTime.parse(json['timestamp'] as String),
       messageId: json['messageId'] as String?,
+      roomId: json['roomId'] as String?,
       status: MessageStatus.values.firstWhere(
             (e) => e.toString() == json['status'],
         orElse: () => MessageStatus.sent,
@@ -33,6 +36,7 @@ class ChatMessage {
       'content': content,
       'timestamp': timestamp.toIso8601String(),
       'messageId': messageId,
+      'roomId': roomId,
       'status': status.toString(),
     };
   }
