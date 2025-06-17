@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:signalr_chat_plugin/signalr_plugin.dart';
+import 'package:signalr_chat_plugin/user_room_connection.dart';
 import 'dart:developer' as developer;
 
 void main() {
@@ -32,13 +33,13 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final TextEditingController _roomController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final SignalRChatPlugin _chatPlugin = SignalRChatPlugin();
-  final Map<String, List<ChatMessage>> _roomMessages = {};
+  final List<ChatMessage> _messages = [];
   final Set<String> _processedMessageIds = {};
   late String _username;
-  String? _currentRoom;
+  late String _room;
+  List<String> _connectedUsers = [];
   ConnectionStatus _connectionState = ConnectionStatus.connecting;
 
   @override
@@ -51,9 +52,11 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       developer.log('Initializing SignalR connection...');
 
+      // Initialize SignalR with configuration
       await _chatPlugin.initSignalR(
         SignalRConnectionOptions(
-          serverUrl: 'https://wpr.intertoons.net/cloudsanadchatbot/myhub',
+          // serverUrl: 'https://wpr.intertoons.net/cloudsanadchatbot/myhub',
+          serverUrl: 'http://96.9.130.101:6021/chat',
           reconnectInterval: const Duration(seconds: 3),
           maxRetryAttempts: 5,
           autoReconnect: true,
@@ -66,9 +69,30 @@ class _ChatScreenState extends State<ChatScreen> {
 
       developer.log('SignalR initialized, setting up listeners...');
 
-      _username = 'User${DateTime.now().millisecondsSinceEpoch % 1000}';
-      developer.log('Username set to: $_username');
+      // Set a random username and room for demo purposes
+      _username = 'Vishnu';
+      _room = '1';
+      developer.log('Username set to: $_username, Room: $_room');
 
+      // Join the room
+      await _chatPlugin.joinRoom(UserRoomConnection(
+        user: _username,
+        room: _room,
+      ));
+      // Listen to connected users
+      _chatPlugin.connectedUsersStream.listen(
+            (users) {
+          setState(() {
+            _connectedUsers = users;
+          });
+        },
+        onError: (error) {
+          developer.log('Connected users stream error: $error');
+          _handleError(error.toString());
+        },
+      );
+
+      // Listen to messages
       _chatPlugin.messagesStream.listen(
         _handleNewMessage,
         onError: (error) {
@@ -77,6 +101,9 @@ class _ChatScreenState extends State<ChatScreen> {
         },
       );
 
+
+
+      // Listen to connection state changes
       _chatPlugin.connectionStateStream.listen(
         (state) {
           developer.log('Connection state changed to: $state');
@@ -88,6 +115,7 @@ class _ChatScreenState extends State<ChatScreen> {
         },
       );
 
+      // Listen to errors
       _chatPlugin.errorStream.listen(
         (error) {
           developer.log('Error stream received: $error');
@@ -99,23 +127,7 @@ class _ChatScreenState extends State<ChatScreen> {
         },
       );
 
-      _chatPlugin.roomStream.listen(
-        (event) {
-          developer.log('Room event: $event');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(event),
-              backgroundColor: Colors.blue,
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        },
-        onError: (error) {
-          developer.log('Room stream error: $error');
-          _handleError(error.toString());
-        },
-      );
-
+      // Explicitly set the connection state to connected since we know the connection is established
       if (mounted) {
         setState(() {
           _connectionState = ConnectionStatus.connected;
@@ -138,95 +150,37 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleNewMessage(ChatMessage message) {
+    // Skip if we've already processed this message by ID
     if (message.messageId != null &&
         _processedMessageIds.contains(message.messageId)) {
       developer.log('Skipping duplicate message by ID: ${message.messageId}');
       return;
     }
 
+    // Add message ID to processed set if it has one
     if (message.messageId != null) {
       _processedMessageIds.add(message.messageId!);
     }
 
     setState(() {
-      final roomId = message.roomId ?? 'general';
-      if (!_roomMessages.containsKey(roomId)) {
-        _roomMessages[roomId] = [];
-      }
-
+      // If this is our own message, check if we already have a similar message in the list
       if (message.sender == _username) {
-        final existingMsgIndex = _roomMessages[roomId]!.indexWhere(
+        // Look for an existing message with the same content from the same sender
+        final existingMsgIndex = _messages.indexWhere(
             (m) => m.sender == _username && m.content == message.content);
 
         if (existingMsgIndex != -1) {
-          _roomMessages[roomId]![existingMsgIndex] = message;
+          // Update the existing message status if needed
+          _messages[existingMsgIndex] = message;
           developer.log('Updated existing message instead of adding duplicate');
           return;
         }
       }
 
-      _roomMessages[roomId]!.insert(0, message);
+      // If not our message or no existing message found, add as new
+      _messages.insert(0, message);
     });
     _scrollToBottom();
-  }
-
-  Future<void> _joinRoom(String roomId) async {
-    try {
-      await _chatPlugin.joinRoom(roomId);
-      setState(() {
-        _currentRoom = roomId;
-        if (!_roomMessages.containsKey(roomId)) {
-          _roomMessages[roomId] = [];
-        }
-      });
-      _roomController.clear();
-    } catch (e) {
-      _handleError('Failed to join room: $e');
-    }
-  }
-
-  Future<void> _leaveRoom(String roomId) async {
-    try {
-      await _chatPlugin.leaveRoom(roomId);
-      setState(() {
-        if (_currentRoom == roomId) {
-          _currentRoom = null;
-        }
-      });
-    } catch (e) {
-      _handleError('Failed to leave room: $e');
-    }
-  }
-
-  void _showJoinRoomDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Join Room'),
-        content: TextField(
-          controller: _roomController,
-          decoration: const InputDecoration(
-            hintText: 'Enter room name',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              final roomId = _roomController.text.trim();
-              if (roomId.isNotEmpty) {
-                _joinRoom(roomId);
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Join'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _handleConnectionState(ConnectionStatus state) {
@@ -282,12 +236,16 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _sendMessage() async {
     final message = _messageController.text.trim();
-    if (message.isEmpty || _currentRoom == null) return;
+    if (message.isEmpty) return;
 
     try {
       developer.log('Attempting to send message: $message');
       _messageController.clear();
 
+      // Log the current connection state
+      developer.log('Current connection state: $_connectionState');
+
+      // Check if we're connected before sending
       if (_connectionState != ConnectionStatus.connected) {
         developer.log('Cannot send message: Not connected to server');
         ScaffoldMessenger.of(context).showSnackBar(
@@ -299,22 +257,25 @@ class _ChatScreenState extends State<ChatScreen> {
         return;
       }
 
+      // Create a temporary message to show in UI while sending
       final messageId = DateTime.now().millisecondsSinceEpoch.toString();
       final tempMessage = ChatMessage(
         sender: _username,
         content: message,
-        roomId: _currentRoom,
+        timestamp: DateTime.now(),
         messageId: messageId,
-        status: MessageStatus.sent,
+        status: MessageStatus.sending,
       );
 
+      // Add the temporary message to UI
       setState(() {
-        _roomMessages[_currentRoom!]!.insert(0, tempMessage);
+        _messages.insert(0, tempMessage);
         _processedMessageIds.add(messageId);
       });
       _scrollToBottom();
 
-      await _chatPlugin.sendMessage(_username, message, roomId: _currentRoom);
+      // Try to send the message
+      await _chatPlugin.sendMessage(message);
       developer.log('Message sent successfully');
     } catch (e, stackTrace) {
       developer.log('Error sending message: $e');
@@ -378,7 +339,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -395,43 +356,39 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildRoomSelector() {
+  Widget _buildConnectedUsers() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: DropdownButton<String>(
-              value: _currentRoom,
-              hint: const Text('Select Room'),
-              isExpanded: true,
-              items: _roomMessages.keys.map((String room) {
-                return DropdownMenuItem<String>(
-                  value: room,
-                  child: Row(
-                    children: [
-                      Text(room),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.exit_to_app, size: 16),
-                        onPressed: () => _leaveRoom(room),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-              onChanged: (String? newValue) {
-                if (newValue != null) {
-                  setState(() {
-                    _currentRoom = newValue;
-                  });
-                }
-              },
+          const Text(
+            'Connected Users',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _showJoinRoomDialog,
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            children: _connectedUsers.map((user) {
+              final isCurrentUser = user == _username;
+              return Chip(
+                label: Text(
+                  user,
+                  style: TextStyle(
+                    color: isCurrentUser ? Colors.white : Colors.black,
+                  ),
+                ),
+                backgroundColor: isCurrentUser ? Colors.blue : Colors.grey[300],
+              );
+            }).toList(),
           ),
         ],
       ),
@@ -496,8 +453,8 @@ class _ChatScreenState extends State<ChatScreen> {
     Color color;
 
     switch (status) {
-      case MessageStatus.sent:
-        icon = Icons.check;
+      case MessageStatus.sending:
+        icon = Icons.schedule;
         color = Colors.white70;
         break;
       case MessageStatus.delivered:
@@ -526,49 +483,47 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          _buildRoomSelector(),
-          Expanded(
-            child: _currentRoom == null
-                ? const Center(
-                    child: Text('Select or join a room to start chatting'),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    reverse: true,
-                    itemCount: _roomMessages[_currentRoom]?.length ?? 0,
-                    itemBuilder: (context, index) =>
-                        _buildMessageItem(_roomMessages[_currentRoom]![index]),
-                  ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: _buildConnectedUsers(),
           ),
-          if (_currentRoom != null)
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      decoration: InputDecoration(
-                        hintText: 'Type a message...',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                      ),
-                      onSubmitted: (_) => _sendMessage(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FloatingActionButton(
-                    onPressed: _sendMessage,
-                    child: const Icon(Icons.send),
-                  ),
-                ],
-              ),
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollController,
+              reverse: true,
+              itemCount: _messages.length,
+              itemBuilder: (context, index) =>
+                  _buildMessageItem(_messages[index]),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    decoration: InputDecoration(
+                      hintText: 'Type a message...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                    onSubmitted: (_) => _sendMessage(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FloatingActionButton(
+                  onPressed: _sendMessage,
+                  child: const Icon(Icons.send),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -577,7 +532,6 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _messageController.dispose();
-    _roomController.dispose();
     _scrollController.dispose();
     _chatPlugin.dispose();
     _processedMessageIds.clear();
