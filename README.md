@@ -13,7 +13,7 @@ A Flutter plugin that provides real-time chat functionality using SignalR. This 
 - 🚦 Comprehensive error handling and reporting
 - 📨 Message delivery status tracking
 
-## Getting Started
+## 📦 Installation
 
 ### Installation
 
