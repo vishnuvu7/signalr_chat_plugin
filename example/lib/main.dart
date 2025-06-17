@@ -73,16 +73,22 @@ class _ChatScreenState extends State<ChatScreen> {
   late String _username;
   late String _room;
   ConnectionStatus _connectionState = ConnectionStatus.connecting;
+  bool _isInitialized = false;
 
   @override
   void initState() {
     super.initState();
+    _username = widget.userName;
+    _room = widget.room;
     _initializeChat();
   }
 
   Future<void> _initializeChat() async {
     try {
       developer.log('Initializing SignalR connection...');
+
+      // First set up all the listeners before initializing
+      _setupListeners();
 
       // Initialize SignalR with configuration
       await _chatPlugin.initSignalR(
@@ -98,71 +104,28 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
-      developer.log('SignalR initialized, setting up listeners...');
+      developer.log('SignalR initialized successfully');
 
-      // Set a random username and room for demo purposes
-      _username = widget.userName;
-      _room = widget.room;
-      developer.log('Username set to: $_username, Room: $_room');
+      // Add a small delay to ensure connection is fully established
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      // Join the room
+      // Now join the room
+      developer.log('Attempting to join room: $_room with username: $_username');
+
       await _chatPlugin.joinRoom(UserRoomConnection(
         user: _username,
         room: _room,
       ));
-      // Listen to connected users
-      // _chatPlugin.connectedUsersStream.listen(
-      //       (users) {
-      //     setState(() {
-      //       _connectedUsers = users;
-      //     });
-      //   },
-      //   onError: (error) {
-      //     developer.log('Connected users stream error: $error');
-      //     _handleError(error.toString());
-      //   },
-      // );
 
-      // Listen to messages
-      _chatPlugin.messagesStream.listen(
-        _handleNewMessage,
-        onError: (error) {
-          developer.log('Message stream error: $error');
-          _handleError(error.toString());
-        },
-      );
+      developer.log('Successfully joined room');
 
+      // Mark as initialized
+      setState(() {
+        _isInitialized = true;
+        _connectionState = ConnectionStatus.connected;
+      });
 
-
-      // Listen to connection state changes
-      _chatPlugin.connectionStateStream.listen(
-            (state) {
-          developer.log('Connection state changed to: $state');
-          _handleConnectionState(state);
-        },
-        onError: (error) {
-          developer.log('Connection state stream error: $error');
-          _handleError(error.toString());
-        },
-      );
-
-      // Listen to errors
-      _chatPlugin.errorStream.listen(
-            (error) {
-          developer.log('Error stream received: $error');
-          _handleError(error);
-        },
-        onError: (error) {
-          developer.log('Error stream error: $error');
-          _handleError(error.toString());
-        },
-      );
-
-      // Explicitly set the connection state to connected since we know the connection is established
       if (mounted) {
-        setState(() {
-          _connectionState = ConnectionStatus.connected;
-        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Connected to chat'),
@@ -172,15 +135,77 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
 
-      developer.log('All listeners set up successfully');
     } catch (e, stackTrace) {
       developer.log('Error initializing chat: $e');
       developer.log('Stack trace: $stackTrace');
+
+      setState(() {
+        _connectionState = ConnectionStatus.disconnected;
+      });
+
       _handleError('Failed to initialize chat: $e');
+
+      // Retry connection after a delay
+      if (mounted) {
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted && !_isInitialized) {
+            _initializeChat();
+          }
+        });
+      }
     }
   }
 
+  void _setupListeners() {
+    // Listen to messages
+    _chatPlugin.messagesStream.listen(
+      _handleNewMessage,
+      onError: (error) {
+        developer.log('Message stream error: $error');
+        _handleError(error.toString());
+      },
+    );
+
+    // Listen to connected users
+    _chatPlugin.connectedUsersStream.listen(
+          (users) {
+        developer.log('Connected users updated: $users');
+        // Handle connected users if needed
+      },
+      onError: (error) {
+        developer.log('Connected users stream error: $error');
+        _handleError(error.toString());
+      },
+    );
+
+    // Listen to connection state changes
+    _chatPlugin.connectionStateStream.listen(
+          (state) {
+        developer.log('Connection state changed to: $state');
+        _handleConnectionState(state);
+      },
+      onError: (error) {
+        developer.log('Connection state stream error: $error');
+        _handleError(error.toString());
+      },
+    );
+
+    // Listen to errors
+    _chatPlugin.errorStream.listen(
+          (error) {
+        developer.log('Error stream received: $error');
+        _handleError(error);
+      },
+      onError: (error) {
+        developer.log('Error stream error: $error');
+        _handleError(error.toString());
+      },
+    );
+  }
+
   void _handleNewMessage(ChatMessage message) {
+    developer.log('Received message from ${message.sender}: ${message.content}');
+
     // Skip if we've already processed this message by ID
     if (message.messageId != null &&
         _processedMessageIds.contains(message.messageId)) {
@@ -197,18 +222,23 @@ class _ChatScreenState extends State<ChatScreen> {
       // If this is our own message, check if we already have a similar message in the list
       if (message.sender == _username) {
         // Look for an existing message with the same content from the same sender
-        final existingMsgIndex = _messages.indexWhere(
-                (m) => m.sender == _username && m.content == message.content);
+        // that was sent within the last few seconds
+        final now = DateTime.now();
+        final existingMsgIndex = _messages.indexWhere((m) =>
+        m.sender == _username &&
+            m.content == message.content &&
+            now.difference(m.timestamp).inSeconds < 5
+        );
 
         if (existingMsgIndex != -1) {
-          // Update the existing message status if needed
+          // Update the existing message status
           _messages[existingMsgIndex] = message;
           developer.log('Updated existing message instead of adding duplicate');
           return;
         }
       }
 
-      // If not our message or no existing message found, add as new
+      // Add new message
       _messages.insert(0, message);
     });
     _scrollToBottom();
@@ -221,6 +251,9 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _connectionState = state;
     });
+
+    // Don't show snackbar for initial connecting state
+    if (state == ConnectionStatus.connecting && !_isInitialized) return;
 
     String message;
     Color backgroundColor;
@@ -244,7 +277,6 @@ class _ChatScreenState extends State<ChatScreen> {
         break;
     }
 
-    developer.log('Showing connection state snackbar: $message');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -257,10 +289,13 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleError(String error) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Error: $error'),
         backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -269,24 +304,21 @@ class _ChatScreenState extends State<ChatScreen> {
     final message = _messageController.text.trim();
     if (message.isEmpty) return;
 
+    // Check if initialized
+    if (!_isInitialized) {
+      _handleError('Chat not initialized. Please wait...');
+      return;
+    }
+
+    // Check connection state
+    if (_connectionState != ConnectionStatus.connected) {
+      _handleError('Not connected to server');
+      return;
+    }
+
     try {
-      developer.log('Attempting to send message: $message');
+      developer.log('Sending message: $message');
       _messageController.clear();
-
-      // Log the current connection state
-      developer.log('Current connection state: $_connectionState');
-
-      // Check if we're connected before sending
-      if (_connectionState != ConnectionStatus.connected) {
-        developer.log('Cannot send message: Not connected to server');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cannot send message: Not connected to server'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
 
       // Create a temporary message to show in UI while sending
       final messageId = DateTime.now().millisecondsSinceEpoch.toString();
@@ -305,37 +337,43 @@ class _ChatScreenState extends State<ChatScreen> {
       });
       _scrollToBottom();
 
-      // Try to send the message
+      // Send the message
       await _chatPlugin.sendMessage(message);
       developer.log('Message sent successfully');
+
     } catch (e, stackTrace) {
       developer.log('Error sending message: $e');
       developer.log('Stack trace: $stackTrace');
 
-      String errorMessage = 'Failed to send message';
-      if (e.toString().contains('SendMessage')) {
-        errorMessage =
-        'Server rejected the message. Please check the message format.';
-      }
+      // Update the message status to failed
+      setState(() {
+        final index = _messages.indexWhere((m) => m.content == message && m.sender == _username);
+        if (index != -1) {
+          _messages[index] = ChatMessage(
+            sender: _username,
+            content: message,
+            timestamp: _messages[index].timestamp,
+            messageId: _messages[index].messageId,
+            status: MessageStatus.failed,
+          );
+        }
+      });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _handleError('Failed to send message');
     }
   }
 
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
     }
   }
 
@@ -368,9 +406,10 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: const EdgeInsets.only(right: 8),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -387,7 +426,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-
   Widget _buildMessageItem(ChatMessage message) {
     final isMyMessage = message.sender == _username;
 
@@ -396,9 +434,17 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.7,
+        ),
         decoration: BoxDecoration(
           color: isMyMessage ? Colors.blue : Colors.grey[300],
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(12),
+            topRight: const Radius.circular(12),
+            bottomLeft: isMyMessage ? const Radius.circular(12) : Radius.zero,
+            bottomRight: isMyMessage ? Radius.zero : const Radius.circular(12),
+          ),
         ),
         child: Column(
           crossAxisAlignment:
@@ -408,6 +454,7 @@ class _ChatScreenState extends State<ChatScreen> {
               message.sender,
               style: TextStyle(
                 fontSize: 12,
+                fontWeight: FontWeight.bold,
                 color: isMyMessage ? Colors.white70 : Colors.black54,
               ),
             ),
@@ -471,17 +518,31 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SignalR Chat'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('SignalR Chat'),
+            Text(
+              'Room: $_room',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
         actions: [_buildConnectionStatus()],
       ),
       body: Column(
         children: [
-          // Padding(
-          //   padding: const EdgeInsets.all(8.0),
-          //   child: _buildConnectedUsers(),
-          // ),
           Expanded(
-            child: ListView.builder(
+            child: _messages.isEmpty
+                ? Center(
+              child: Text(
+                _isInitialized
+                    ? 'No messages yet. Start a conversation!'
+                    : 'Connecting to chat...',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            )
+                : ListView.builder(
               controller: _scrollController,
               reverse: true,
               itemCount: _messages.length,
@@ -489,15 +550,28 @@ class _ChatScreenState extends State<ChatScreen> {
                   _buildMessageItem(_messages[index]),
             ),
           ),
-          Padding(
+          Container(
             padding: const EdgeInsets.all(8.0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _messageController,
+                    enabled: _isInitialized && _connectionState == ConnectionStatus.connected,
                     decoration: InputDecoration(
-                      hintText: 'Type a message...',
+                      hintText: _isInitialized
+                          ? 'Type a message...'
+                          : 'Connecting...',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                       ),
@@ -511,7 +585,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 const SizedBox(width: 8),
                 FloatingActionButton(
-                  onPressed: _sendMessage,
+                  onPressed: _isInitialized && _connectionState == ConnectionStatus.connected
+                      ? _sendMessage
+                      : null,
+                  backgroundColor: _isInitialized && _connectionState == ConnectionStatus.connected
+                      ? Theme.of(context).primaryColor
+                      : Colors.grey,
                   child: const Icon(Icons.send),
                 ),
               ],
@@ -524,9 +603,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    developer.log('Disposing chat screen');
     _messageController.dispose();
     _scrollController.dispose();
-    _chatPlugin.dispose();
+    _chatPlugin.disconnect();
     _processedMessageIds.clear();
     super.dispose();
   }
