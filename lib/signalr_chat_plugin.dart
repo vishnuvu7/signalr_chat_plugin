@@ -5,6 +5,7 @@ import 'package:signalr_core/signalr_core.dart';
 
 import 'connection_options.dart';
 import 'message.dart';
+import 'user_room_connection.dart';
 
 class SignalRChatPlugin {
   static final SignalRChatPlugin _instance = SignalRChatPlugin._internal();
@@ -14,22 +15,26 @@ class SignalRChatPlugin {
   final List<ChatMessage> _messageQueue = [];
 
   final StreamController<ChatMessage> _messageStreamController =
-      StreamController.broadcast();
+  StreamController.broadcast();
+  final StreamController<List<String>> _connectedUsersStreamController =
+  StreamController.broadcast();
 
   Stream<ChatMessage> get messagesStream => _messageStreamController.stream;
+  Stream<List<String>> get connectedUsersStream => _connectedUsersStreamController.stream;
 
   final StreamController<ConnectionStatus> _connectionStateController =
-      StreamController.broadcast();
+  StreamController.broadcast();
 
   Stream<ConnectionStatus> get connectionStateStream =>
       _connectionStateController.stream;
 
   final StreamController<String> _errorStreamController =
-      StreamController.broadcast();
+  StreamController.broadcast();
 
   Stream<String> get errorStream => _errorStreamController.stream;
 
   SignalRConnectionOptions? _options;
+  UserRoomConnection? _currentConnection;
 
   factory SignalRChatPlugin() {
     return _instance;
@@ -44,7 +49,7 @@ class SignalRChatPlugin {
         _connection.state == HubConnectionState.connected) {
       final message = _messageQueue.first;
       try {
-        await sendMessage(message.sender, message.content);
+        await sendMessage(message.content);
         _messageQueue.removeAt(0);
       } catch (e) {
         _errorStreamController.add('Failed to process queued message: $e');
@@ -63,6 +68,9 @@ class SignalRChatPlugin {
         await _connection.start();
         _connectionStateController.add(ConnectionStatus.connected);
         _retryCount = 0;
+        if (_currentConnection != null) {
+          await joinRoom(_currentConnection!);
+        }
         await _processMessageQueue();
         break;
       } catch (e) {
@@ -95,19 +103,19 @@ class SignalRChatPlugin {
       _connection =
           HubConnectionBuilder()
               .withUrl(
-                options.serverUrl,
-                HttpConnectionOptions(
-                  transport: HttpTransportType.webSockets,
-                  skipNegotiation: true,
-                  accessTokenFactory:
-                      options.accessToken != null
-                          ? () async => options.accessToken!
-                          : null,
-                  logging:
-                      (level, message) =>
-                          developer.log('SignalR Log: $message'),
-                ),
-              )
+            options.serverUrl,
+            HttpConnectionOptions(
+              transport: HttpTransportType.longPolling,
+              skipNegotiation: false,
+              accessTokenFactory:
+              options.accessToken != null
+                  ? () async => options.accessToken!
+                  : null,
+              logging:
+                  (level, message) =>
+                  developer.log('SignalR Log: $message'),
+            ),
+          )
               .withAutomaticReconnect()
               .build();
 
@@ -144,12 +152,12 @@ class SignalRChatPlugin {
 
   void _setupMessageHandlers() {
     _connection.on('ReceiveMessage', (List<Object?>? arguments) {
-      if (arguments != null && arguments.length >= 2) {
+      if (arguments != null && arguments.length >= 3) {
         try {
           final message = ChatMessage(
             sender: arguments[0] as String,
             content: arguments[1] as String,
-            messageId: arguments.length > 2 ? arguments[2] as String? : null,
+            timestamp: DateTime.parse(arguments[2] as String),
             status: MessageStatus.delivered,
           );
           _messageStreamController.add(message);
@@ -158,49 +166,62 @@ class SignalRChatPlugin {
         }
       }
     });
+
+    _connection.on('ConnectedUser', (List<Object?>? arguments) {
+      if (arguments != null) {
+        try {
+          final users =
+          (arguments[0] as List<dynamic>)
+              .map((user) => user as String)
+              .toList();
+          _connectedUsersStreamController.add(users);
+        } catch (e) {
+          _errorStreamController.add('Error processing connected users: $e');
+        }
+      }
+    });
   }
 
-  Future<void> sendMessage(String sender, String content) async {
-    final message = ChatMessage(
-      sender: sender,
-      content: content,
-      messageId: DateTime.now().millisecondsSinceEpoch.toString(),
-    );
+  Future<void> joinRoom(UserRoomConnection userConnection) async {
+    _currentConnection = userConnection;
+    try {
+      await _connection.invoke('JoinRoom', args: [userConnection.toJson()]);
+    } catch (e) {
+      _errorStreamController.add('Failed to join room: $e');
+      rethrow;
+    }
+  }
 
+  Future<void> sendMessage(String content) async {
     if (_connection.state != HubConnectionState.connected) {
-      _messageQueue.add(message);
+      _messageQueue.add(
+        ChatMessage(
+          sender: _currentConnection?.user ?? 'Unknown',
+          content: content,
+          timestamp: DateTime.now(),
+        ),
+      );
       _errorStreamController.add('Message queued for later delivery');
       return;
     }
 
     try {
-      // Try different method names and parameter formats that might be expected by the server
-      try {
-        // First try with the original format
-        await _connection.invoke(
-          'SendMessage',
-          args: [message.sender, message.content, message.messageId],
-        );
-      } catch (e) {
-        developer.log('First attempt failed, trying alternative format...');
-        // Try with just sender and content
-        await _connection.invoke(
-          'SendMessage',
-          args: [message.sender, message.content],
-        );
-      }
-
-      // Don't add the message to the stream here - let the server's response handle it
-      // The server will send back the message through the ReceiveMessage handler
+      await _connection.invoke('SendMessage', args: [content]);
     } catch (e) {
       developer.log('Error sending message: $e');
-      _messageQueue.add(message);
+      _messageQueue.add(
+        ChatMessage(
+          sender: _currentConnection?.user ?? 'Unknown',
+          content: content,
+          timestamp: DateTime.now(),
+        ),
+      );
       _errorStreamController.add('Failed to send message: $e');
 
       final failedMessage = ChatMessage(
-        sender: message.sender,
-        content: message.content,
-        messageId: message.messageId,
+        sender: _currentConnection?.user ?? 'Unknown',
+        content: content,
+        timestamp: DateTime.now(),
         status: MessageStatus.failed,
       );
       _messageStreamController.add(failedMessage);
@@ -211,6 +232,7 @@ class SignalRChatPlugin {
     if (_isInitialized) {
       await _connection.stop();
       _isInitialized = false;
+      _currentConnection = null;
       _connectionStateController.add(ConnectionStatus.disconnected);
     }
   }
@@ -224,5 +246,6 @@ class SignalRChatPlugin {
     _messageStreamController.close();
     _connectionStateController.close();
     _errorStreamController.close();
+    _connectedUsersStreamController.close();
   }
 }

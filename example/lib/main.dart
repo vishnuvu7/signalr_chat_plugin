@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:signalr_chat_plugin/signalr_plugin.dart';
+import 'package:signalr_chat_plugin/user_room_connection.dart';
 import 'dart:developer' as developer;
 
 void main() {
@@ -18,13 +19,46 @@ class ChatApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         useMaterial3: true,
       ),
-      home: const ChatScreen(),
+      home: const StartScreen(),
+    );
+  }
+}
+
+class StartScreen extends StatelessWidget {
+  const StartScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const ChatScreen(room: "room 1", userName: "Vishnu"),
+              ),
+            );
+          },
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30),
+            ),
+          ),
+          child: const Text(
+            'Join Room',
+            style: TextStyle(fontSize: 18),
+          ),
+        ),
+      ),
     );
   }
 }
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final String room;
+  final String userName;
+  const ChatScreen({super.key, required this.room, required this.userName});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -37,6 +71,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<ChatMessage> _messages = [];
   final Set<String> _processedMessageIds = {};
   late String _username;
+  late String _room;
   ConnectionStatus _connectionState = ConnectionStatus.connecting;
 
   @override
@@ -52,7 +87,7 @@ class _ChatScreenState extends State<ChatScreen> {
       // Initialize SignalR with configuration
       await _chatPlugin.initSignalR(
         SignalRConnectionOptions(
-          serverUrl: 'http://your-server/chathub',
+          serverUrl: 'http://96.9.130.101:6021/chat',
           reconnectInterval: const Duration(seconds: 3),
           maxRetryAttempts: 5,
           autoReconnect: true,
@@ -65,9 +100,28 @@ class _ChatScreenState extends State<ChatScreen> {
 
       developer.log('SignalR initialized, setting up listeners...');
 
-      // Set a random username for demo purposes
-      _username = 'User${DateTime.now().millisecondsSinceEpoch % 1000}';
-      developer.log('Username set to: $_username');
+      // Set a random username and room for demo purposes
+      _username = widget.userName;
+      _room = widget.room;
+      developer.log('Username set to: $_username, Room: $_room');
+
+      // Join the room
+      await _chatPlugin.joinRoom(UserRoomConnection(
+        user: _username,
+        room: _room,
+      ));
+      // Listen to connected users
+      // _chatPlugin.connectedUsersStream.listen(
+      //       (users) {
+      //     setState(() {
+      //       _connectedUsers = users;
+      //     });
+      //   },
+      //   onError: (error) {
+      //     developer.log('Connected users stream error: $error');
+      //     _handleError(error.toString());
+      //   },
+      // );
 
       // Listen to messages
       _chatPlugin.messagesStream.listen(
@@ -78,9 +132,11 @@ class _ChatScreenState extends State<ChatScreen> {
         },
       );
 
+
+
       // Listen to connection state changes
       _chatPlugin.connectionStateStream.listen(
-        (state) {
+            (state) {
           developer.log('Connection state changed to: $state');
           _handleConnectionState(state);
         },
@@ -92,7 +148,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Listen to errors
       _chatPlugin.errorStream.listen(
-        (error) {
+            (error) {
           developer.log('Error stream received: $error');
           _handleError(error);
         },
@@ -124,37 +180,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // void _handleNewMessage(ChatMessage message) {
-  //   // Skip if we've already processed this message
-  //   if (message.messageId != null &&
-  //       _processedMessageIds.contains(message.messageId)) {
-  //     developer.log('Skipping duplicate message: ${message.messageId}');
-  //     return;
-  //   }
-
-  //   // Add message ID to processed set
-  //   if (message.messageId != null) {
-  //     _processedMessageIds.add(message.messageId!);
-  //   }
-
-  //   setState(() {
-  //     // If this is our own message, update the existing message instead of adding a new one
-  //     if (message.sender == _username) {
-  //       final index =
-  //           _messages.indexWhere((m) => m.messageId == message.messageId);
-  //       if (index != -1) {
-  //         _messages[index] = message;
-  //       } else {
-  //         _messages.insert(0, message);
-  //       }
-  //     } else {
-  //       _messages.insert(0, message);
-  //     }
-  //   });
-  //   _scrollToBottom();
-  // }
-
-// Option 1: Fixed handleNewMessage to better detect and handle duplicates
   void _handleNewMessage(ChatMessage message) {
     // Skip if we've already processed this message by ID
     if (message.messageId != null &&
@@ -173,7 +198,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (message.sender == _username) {
         // Look for an existing message with the same content from the same sender
         final existingMsgIndex = _messages.indexWhere(
-            (m) => m.sender == _username && m.content == message.content);
+                (m) => m.sender == _username && m.content == message.content);
 
         if (existingMsgIndex != -1) {
           // Update the existing message status if needed
@@ -268,8 +293,9 @@ class _ChatScreenState extends State<ChatScreen> {
       final tempMessage = ChatMessage(
         sender: _username,
         content: message,
+        timestamp: DateTime.now(),
         messageId: messageId,
-        status: MessageStatus.sent,
+        status: MessageStatus.sending,
       );
 
       // Add the temporary message to UI
@@ -280,7 +306,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToBottom();
 
       // Try to send the message
-      await _chatPlugin.sendMessage(_username, message);
+      await _chatPlugin.sendMessage(message);
       developer.log('Message sent successfully');
     } catch (e, stackTrace) {
       developer.log('Error sending message: $e');
@@ -289,7 +315,7 @@ class _ChatScreenState extends State<ChatScreen> {
       String errorMessage = 'Failed to send message';
       if (e.toString().contains('SendMessage')) {
         errorMessage =
-            'Server rejected the message. Please check the message format.';
+        'Server rejected the message. Please check the message format.';
       }
 
       if (mounted) {
@@ -361,6 +387,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+
   Widget _buildMessageItem(ChatMessage message) {
     final isMyMessage = message.sender == _username;
 
@@ -375,7 +402,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         child: Column(
           crossAxisAlignment:
-              isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Text(
               message.sender,
@@ -419,8 +446,8 @@ class _ChatScreenState extends State<ChatScreen> {
     Color color;
 
     switch (status) {
-      case MessageStatus.sent:
-        icon = Icons.check;
+      case MessageStatus.sending:
+        icon = Icons.schedule;
         color = Colors.white70;
         break;
       case MessageStatus.delivered:
@@ -449,6 +476,10 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
+          // Padding(
+          //   padding: const EdgeInsets.all(8.0),
+          //   child: _buildConnectedUsers(),
+          // ),
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
