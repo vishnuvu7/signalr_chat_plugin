@@ -9,10 +9,18 @@ class ChatMessage {
   ChatMessage({
     required this.sender,
     required this.content,
-    DateTime? timestamp,
+    required this.timestamp,
     this.messageId,
-    this.status = MessageStatus.sent,
-  }) : timestamp = timestamp ?? DateTime.now();
+    this.status = MessageStatus.sending,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'sender': sender,
+    'content': content,
+    'timestamp': timestamp.toIso8601String(),
+    'messageId': messageId,
+    'status': status.toString(),
+  };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
@@ -22,21 +30,12 @@ class ChatMessage {
       messageId: json['messageId'] as String?,
       status: MessageStatus.values.firstWhere(
             (e) => e.toString() == json['status'],
-        orElse: () => MessageStatus.sent,
+        orElse: () => MessageStatus.sending,
       ),
     );
   }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'sender': sender,
-      'content': content,
-      'timestamp': timestamp.toIso8601String(),
-      'messageId': messageId,
-      'status': status.toString(),
-    };
-  }
 }
 
-enum MessageStatus { sent, delivered, failed }
+enum MessageStatus { sending, delivered, failed }
+
 enum ConnectionStatus { connecting, connected, disconnected, reconnecting }
