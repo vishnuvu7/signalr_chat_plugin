@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:signalr_chat_plugin/signalr_plugin.dart';
 import 'package:signalr_chat_plugin/user_room_connection.dart';
 import 'dart:developer' as developer;
+import 'package:signalr_core/signalr_core.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,7 +36,8 @@ class StartScreen extends StatelessWidget {
           onPressed: () {
             Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (context) => const ChatScreen(room: "room 1", userName: "Vishnu"),
+                builder: (context) =>
+                    const ChatScreen(room: "room 1", userName: "Vishnu"),
               ),
             );
           },
@@ -101,6 +103,9 @@ class _ChatScreenState extends State<ChatScreen> {
             developer.log('SignalR error: $error');
             _handleError(error);
           },
+          transport:
+              HttpTransportType.webSockets, // Explicitly set transport type
+          skipNegotiation: false, // Explicitly set skipNegotiation
         ),
       );
 
@@ -110,7 +115,8 @@ class _ChatScreenState extends State<ChatScreen> {
       await Future.delayed(const Duration(milliseconds: 500));
 
       // Now join the room
-      developer.log('Attempting to join room: $_room with username: $_username');
+      developer
+          .log('Attempting to join room: $_room with username: $_username');
 
       await _chatPlugin.joinRoom(UserRoomConnection(
         user: _username,
@@ -134,7 +140,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         );
       }
-
     } catch (e, stackTrace) {
       developer.log('Error initializing chat: $e');
       developer.log('Stack trace: $stackTrace');
@@ -168,7 +173,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Listen to connected users
     _chatPlugin.connectedUsersStream.listen(
-          (users) {
+      (users) {
         developer.log('Connected users updated: $users');
         // Handle connected users if needed
       },
@@ -180,7 +185,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Listen to connection state changes
     _chatPlugin.connectionStateStream.listen(
-          (state) {
+      (state) {
         developer.log('Connection state changed to: $state');
         _handleConnectionState(state);
       },
@@ -192,7 +197,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     // Listen to errors
     _chatPlugin.errorStream.listen(
-          (error) {
+      (error) {
         developer.log('Error stream received: $error');
         _handleError(error);
       },
@@ -204,7 +209,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _handleNewMessage(ChatMessage message) {
-    developer.log('Received message from ${message.sender}: ${message.content}');
+    developer
+        .log('Received message from ${message.sender}: ${message.content}');
 
     // Skip if we've already processed this message by ID
     if (message.messageId != null &&
@@ -225,10 +231,9 @@ class _ChatScreenState extends State<ChatScreen> {
         // that was sent within the last few seconds
         final now = DateTime.now();
         final existingMsgIndex = _messages.indexWhere((m) =>
-        m.sender == _username &&
+            m.sender == _username &&
             m.content == message.content &&
-            now.difference(m.timestamp).inSeconds < 5
-        );
+            now.difference(m.timestamp).inSeconds < 5);
 
         if (existingMsgIndex != -1) {
           // Update the existing message status
@@ -340,14 +345,14 @@ class _ChatScreenState extends State<ChatScreen> {
       // Send the message
       await _chatPlugin.sendMessage(message);
       developer.log('Message sent successfully');
-
     } catch (e, stackTrace) {
       developer.log('Error sending message: $e');
       developer.log('Stack trace: $stackTrace');
 
       // Update the message status to failed
       setState(() {
-        final index = _messages.indexWhere((m) => m.content == message && m.sender == _username);
+        final index = _messages
+            .indexWhere((m) => m.content == message && m.sender == _username);
         if (index != -1) {
           _messages[index] = ChatMessage(
             sender: _username,
@@ -448,7 +453,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         child: Column(
           crossAxisAlignment:
-          isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Text(
               message.sender,
@@ -535,20 +540,20 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: _messages.isEmpty
                 ? Center(
-              child: Text(
-                _isInitialized
-                    ? 'No messages yet. Start a conversation!'
-                    : 'Connecting to chat...',
-                style: TextStyle(color: Colors.grey[600]),
-              ),
-            )
+                    child: Text(
+                      _isInitialized
+                          ? 'No messages yet. Start a conversation!'
+                          : 'Connecting to chat...',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                  )
                 : ListView.builder(
-              controller: _scrollController,
-              reverse: true,
-              itemCount: _messages.length,
-              itemBuilder: (context, index) =>
-                  _buildMessageItem(_messages[index]),
-            ),
+                    controller: _scrollController,
+                    reverse: true,
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) =>
+                        _buildMessageItem(_messages[index]),
+                  ),
           ),
           Container(
             padding: const EdgeInsets.all(8.0),
@@ -567,7 +572,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _messageController,
-                    enabled: _isInitialized && _connectionState == ConnectionStatus.connected,
+                    enabled: _isInitialized &&
+                        _connectionState == ConnectionStatus.connected,
                     decoration: InputDecoration(
                       hintText: _isInitialized
                           ? 'Type a message...'
@@ -585,10 +591,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 const SizedBox(width: 8),
                 FloatingActionButton(
-                  onPressed: _isInitialized && _connectionState == ConnectionStatus.connected
+                  onPressed: _isInitialized &&
+                          _connectionState == ConnectionStatus.connected
                       ? _sendMessage
                       : null,
-                  backgroundColor: _isInitialized && _connectionState == ConnectionStatus.connected
+                  backgroundColor: _isInitialized &&
+                          _connectionState == ConnectionStatus.connected
                       ? Theme.of(context).primaryColor
                       : Colors.grey,
                   child: const Icon(Icons.send),
