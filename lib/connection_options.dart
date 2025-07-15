@@ -1,3 +1,5 @@
+import 'package:signalr_core/signalr_core.dart';
+
 class SignalRConnectionOptions {
   final String serverUrl;
   final String? accessToken;
@@ -6,6 +8,8 @@ class SignalRConnectionOptions {
   final bool autoReconnect;
   final Function(String)? onError;
   final bool useSecureConnection;
+  final HttpTransportType transport;
+  final bool skipNegotiation;
 
   SignalRConnectionOptions({
     required this.serverUrl,
@@ -15,5 +19,7 @@ class SignalRConnectionOptions {
     this.autoReconnect = true,
     this.onError,
     this.useSecureConnection = true,
+    this.transport = HttpTransportType.webSockets,
+    this.skipNegotiation = false,
   });
 }

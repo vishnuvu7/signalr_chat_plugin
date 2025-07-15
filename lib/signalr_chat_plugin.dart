@@ -15,22 +15,22 @@ class SignalRChatPlugin {
   final List<ChatMessage> _messageQueue = [];
 
   final StreamController<ChatMessage> _messageStreamController =
-  StreamController.broadcast();
+      StreamController.broadcast();
   final StreamController<List<String>> _connectedUsersStreamController =
-  StreamController.broadcast();
+      StreamController.broadcast();
 
   Stream<ChatMessage> get messagesStream => _messageStreamController.stream;
   Stream<List<String>> get connectedUsersStream =>
       _connectedUsersStreamController.stream;
 
   final StreamController<ConnectionStatus> _connectionStateController =
-  StreamController.broadcast();
+      StreamController.broadcast();
 
   Stream<ConnectionStatus> get connectionStateStream =>
       _connectionStateController.stream;
 
   final StreamController<String> _errorStreamController =
-  StreamController.broadcast();
+      StreamController.broadcast();
 
   Stream<String> get errorStream => _errorStreamController.stream;
 
@@ -108,22 +108,24 @@ class SignalRChatPlugin {
 
       developer.log('Building SignalR connection to: ${options.serverUrl}');
 
-      _connection = HubConnectionBuilder()
-          .withUrl(
-        options.serverUrl,
-        HttpConnectionOptions(
-          transport: HttpTransportType.longPolling,
-          skipNegotiation: false,
-          accessTokenFactory:
-          options.accessToken != null
-              ? () async => options.accessToken!
-              : null,
-          logging: (level, message) =>
-              developer.log('SignalR: [$level] $message'),
-        ),
-      )
-          .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
-          .build();
+      _connection =
+          HubConnectionBuilder()
+              .withUrl(
+                options.serverUrl,
+                HttpConnectionOptions(
+                  transport: options.transport,
+                  skipNegotiation: options.skipNegotiation,
+                  accessTokenFactory:
+                      options.accessToken != null
+                          ? () async => options.accessToken!
+                          : null,
+                  logging:
+                      (level, message) =>
+                          developer.log('SignalR: [$level] $message'),
+                ),
+              )
+              .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+              .build();
 
       // Setup handlers before starting connection
       _setupConnectionHandlers();
@@ -179,7 +181,8 @@ class SignalRChatPlugin {
         try {
           final sender = arguments[0]?.toString() ?? 'Unknown';
           final content = arguments[1]?.toString() ?? '';
-          final timestamp = arguments[2]?.toString() ?? DateTime.now().toIso8601String();
+          final timestamp =
+              arguments[2]?.toString() ?? DateTime.now().toIso8601String();
 
           final message = ChatMessage(
             sender: sender,
@@ -204,9 +207,10 @@ class SignalRChatPlugin {
 
       if (arguments != null && arguments.isNotEmpty) {
         try {
-          final users = (arguments[0] as List<dynamic>)
-              .map((user) => user.toString())
-              .toList();
+          final users =
+              (arguments[0] as List<dynamic>)
+                  .map((user) => user.toString())
+                  .toList();
           developer.log('Connected users: $users');
           _connectedUsersStreamController.add(users);
         } catch (e) {
@@ -239,13 +243,12 @@ class SignalRChatPlugin {
     _currentConnection = userConnection;
 
     try {
-      developer.log('Joining room - User: ${userConnection.user}, Room: ${userConnection.room}');
+      developer.log(
+        'Joining room - User: ${userConnection.user}, Room: ${userConnection.room}',
+      );
 
       // Try different invoke patterns based on what your server expects
-      await _connection.invoke(
-        'JoinRoom',
-        args: [userConnection.toJson()],
-      );
+      await _connection.invoke('JoinRoom', args: [userConnection.toJson()]);
 
       developer.log('JoinRoom invoked successfully');
     } catch (e) {
@@ -269,7 +272,9 @@ class SignalRChatPlugin {
 
   Future<void> sendMessage(String content) async {
     if (_connection.state != HubConnectionState.connected) {
-      developer.log('Cannot send message: Not connected (state: ${_connection.state})');
+      developer.log(
+        'Cannot send message: Not connected (state: ${_connection.state})',
+      );
 
       _messageQueue.add(
         ChatMessage(
