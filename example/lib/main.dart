@@ -37,7 +37,7 @@ class StartScreen extends StatelessWidget {
             Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (context) =>
-                    const ChatScreen(room: "room 1", userName: "Vishnu"),
+                    const ChatScreen(room: "UUUUU", userName: "Vishnu"),
               ),
             );
           },
@@ -105,7 +105,7 @@ class _ChatScreenState extends State<ChatScreen> {
           },
           transport:
               HttpTransportType.webSockets, // Explicitly set transport type
-          skipNegotiation: false, // Explicitly set skipNegotiation
+          skipNegotiation: true, // Explicitly set skipNegotiation
         ),
       );
 
