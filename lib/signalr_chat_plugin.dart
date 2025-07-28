@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:signalr_core/signalr_core.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import 'connection_options.dart';
 import 'message.dart';
@@ -62,9 +63,45 @@ class SignalRChatPlugin {
   Future<void> reconnect() async {
     if (_options == null || !_options!.autoReconnect) return;
 
+    // Wait a bit after resume to allow network stack to recover
+    developer.log('Waiting 2 seconds before attempting reconnection...');
+    await Future.delayed(const Duration(seconds: 2));
+
+    // Check network connectivity
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      developer.log(
+        'No network available. Waiting 3 seconds to retry reconnect...',
+      );
+      _errorStreamController.add('No network available. Waiting to retry...');
+      await Future.delayed(const Duration(seconds: 3));
+      return reconnect(); // Try again later
+    }
+
+    // Check and fix URL if it contains port :0
+    if (_options != null && _options!.serverUrl.contains(':0')) {
+      final fixedUrl = _options!.serverUrl.replaceAll(':0', '');
+      developer.log(
+        'Detected invalid port :0 in URL. Fixing URL from ${_options!.serverUrl} to $fixedUrl',
+      );
+      // Update the options with the corrected URL
+      _options = SignalRConnectionOptions(
+        serverUrl: fixedUrl,
+        accessToken: _options!.accessToken,
+        reconnectInterval: _options!.reconnectInterval,
+        maxRetryAttempts: _options!.maxRetryAttempts,
+        autoReconnect: _options!.autoReconnect,
+        onError: _options!.onError,
+        useSecureConnection: _options!.useSecureConnection,
+        transport: _options!.transport,
+        skipNegotiation: _options!.skipNegotiation,
+      );
+    }
+
     while (_connection.state != HubConnectionState.connected &&
         _retryCount < _options!.maxRetryAttempts) {
       try {
+        developer.log('Attempting to reconnect to: ${_options!.serverUrl}');
         _connectionStateController.add(ConnectionStatus.reconnecting);
         await _connection.start();
         _connectionStateController.add(ConnectionStatus.connected);
@@ -80,10 +117,22 @@ class SignalRChatPlugin {
         break;
       } catch (e) {
         _retryCount++;
-        _errorStreamController.add(
-          'Reconnection attempt $_retryCount failed: $e',
+        developer.log(
+          'Reconnection attempt $_retryCount failed: ${e.toString()}',
         );
-        if (_retryCount < _options!.maxRetryAttempts) {
+        _errorStreamController.add(
+          'Reconnection attempt $_retryCount failed: ${e.toString()}',
+        );
+        // If DNS error, wait longer before retrying
+        if (e.toString().contains('Failed host lookup')) {
+          developer.log(
+            'DNS error detected. Waiting 5 seconds before retrying...',
+          );
+          _errorStreamController.add(
+            'DNS error: Unable to resolve server address. Waiting to retry...',
+          );
+          await Future.delayed(const Duration(seconds: 5));
+        } else if (_retryCount < _options!.maxRetryAttempts) {
           await Future.delayed(_options!.reconnectInterval);
         }
       }
@@ -166,9 +215,13 @@ class SignalRChatPlugin {
       _connectionStateController.add(ConnectionStatus.reconnecting);
     });
 
-    _connection.onreconnected((connectionId) {
+    _connection.onreconnected((connectionId) async {
       developer.log('Connection reconnected: $connectionId');
       _connectionStateController.add(ConnectionStatus.connected);
+      if (_currentConnection != null) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        await joinRoom(_currentConnection!);
+      }
       _processMessageQueue();
     });
   }
