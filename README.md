@@ -18,7 +18,7 @@ A Flutter plugin that provides real-time chat functionality using SignalR. This 
 
 ### Installation
 
-Add this to your package's `pubspec.yaml` file:
+Add this to your package's `pubspec.yaml` file: [https://pub.dev/packages/signalr_chat_plugin](https://pub.dev/packages/signalr_chat_plugin)
 
 ```yaml
 dependencies:
