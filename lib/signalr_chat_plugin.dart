@@ -3,40 +3,17 @@ import 'dart:developer' as developer;
 
 import 'package:signalr_core/signalr_core.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:rxdart/rxdart.dart';
 
 import 'connection_options.dart';
 import 'message.dart';
 import 'user_room_connection.dart';
 
 class SignalRChatPlugin {
+  // ============================================================================
+  // SINGLETON PATTERN
+  // ============================================================================
   static final SignalRChatPlugin _instance = SignalRChatPlugin._internal();
-  late HubConnection _connection;
-  bool _isInitialized = false;
-  int _retryCount = 0;
-  final List<ChatMessage> _messageQueue = [];
-
-  final StreamController<ChatMessage> _messageStreamController =
-      StreamController.broadcast();
-  final StreamController<List<String>> _connectedUsersStreamController =
-      StreamController.broadcast();
-
-  Stream<ChatMessage> get messagesStream => _messageStreamController.stream;
-  Stream<List<String>> get connectedUsersStream =>
-      _connectedUsersStreamController.stream;
-
-  final StreamController<ConnectionStatus> _connectionStateController =
-      StreamController.broadcast();
-
-  Stream<ConnectionStatus> get connectionStateStream =>
-      _connectionStateController.stream;
-
-  final StreamController<String> _errorStreamController =
-      StreamController.broadcast();
-
-  Stream<String> get errorStream => _errorStreamController.stream;
-
-  SignalRConnectionOptions? _options;
-  UserRoomConnection? _currentConnection;
 
   factory SignalRChatPlugin() {
     return _instance;
@@ -44,29 +21,43 @@ class SignalRChatPlugin {
 
   SignalRChatPlugin._internal();
 
-  Future<void> _processMessageQueue() async {
-    if (_messageQueue.isEmpty) return;
+  // ============================================================================
+  // PRIVATE FIELDS
+  // ============================================================================
+  late HubConnection _connection;
+  bool _isInitialized = false;
+  int _retryCount = 0;
+  final List<ChatMessage> _messageQueue = [];
+  SignalRConnectionOptions? _options;
+  UserRoomConnection? _currentConnection;
 
-    while (_messageQueue.isNotEmpty &&
-        _connection.state == HubConnectionState.connected) {
-      final message = _messageQueue.first;
-      try {
-        await sendMessage(message.content);
-        _messageQueue.removeAt(0);
-      } catch (e) {
-        _errorStreamController.add('Failed to process queued message: $e');
-        break;
-      }
-    }
-  }
+  // ============================================================================
+  // RXDART SUBJECTS
+  // ============================================================================
+  final BehaviorSubject<ChatMessage> _messageSubject = BehaviorSubject<ChatMessage>();
+  final BehaviorSubject<List<String>> _connectedUsersSubject = BehaviorSubject<List<String>>();
+  final BehaviorSubject<ConnectionStatus> _connectionStateSubject = BehaviorSubject<ConnectionStatus>();
+  final PublishSubject<String> _errorSubject = PublishSubject<String>();
+  final BehaviorSubject<bool> _isConnectedSubject = BehaviorSubject<bool>.seeded(false);
 
-  Future<void> reconnect() async {
-    if (_options == null || !_options!.autoReconnect) return;
+  // ============================================================================
+  // PUBLIC STREAMS
+  // ============================================================================
+  Stream<ChatMessage> get messagesStream => _messageSubject.stream;
+  Stream<List<String>> get connectedUsersStream => _connectedUsersSubject.stream;
+  Stream<ConnectionStatus> get connectionStateStream => _connectionStateSubject.stream;
+  Stream<String> get errorStream => _errorSubject.stream;
+  Stream<bool> get isConnectedStream => _isConnectedSubject.stream;
 
-    // Wait a bit after resume to allow network stack to recover
-    developer.log('Waiting 2 seconds before attempting reconnection...');
-    await Future.delayed(const Duration(seconds: 2));
+  // ============================================================================
+  // LATEST VALUES (GETTERS)
+  // ============================================================================
+  ChatMessage? get lastMessage => _messageSubject.valueOrNull;
+  List<String> get currentConnectedUsers => _connectedUsersSubject.valueOrNull ?? [];
+  ConnectionStatus get currentConnectionStatus => _connectionStateSubject.valueOrNull ?? ConnectionStatus.disconnected;
+  bool get isConnected => _isConnectedSubject.value;
 
+<<<<<<< Updated upstream
     // Check network connectivity
     var connectivityResult = await Connectivity().checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
@@ -77,73 +68,35 @@ class SignalRChatPlugin {
       await Future.delayed(const Duration(seconds: 3));
       return reconnect(); // Try again later
     }
+=======
+  // ============================================================================
+  // ADVANCED STREAMS
+  // ============================================================================
+  Stream<Map<String, dynamic>> get connectionInfoStream => Rx.combineLatest3(
+    connectionStateStream,
+    isConnectedStream,
+    connectedUsersStream,
+    (ConnectionStatus status, bool connected, List<String> users) => {
+      'status': status,
+      'connected': connected,
+      'users': users,
+      'timestamp': DateTime.now(),
+    },
+  );
+>>>>>>> Stashed changes
 
-    // Check and fix URL if it contains port :0
-    if (_options != null && _options!.serverUrl.contains(':0')) {
-      final fixedUrl = _options!.serverUrl.replaceAll(':0', '');
-      developer.log(
-        'Detected invalid port :0 in URL. Fixing URL from ${_options!.serverUrl} to $fixedUrl',
-      );
-      // Update the options with the corrected URL
-      _options = SignalRConnectionOptions(
-        serverUrl: fixedUrl,
-        accessToken: _options!.accessToken,
-        reconnectInterval: _options!.reconnectInterval,
-        maxRetryAttempts: _options!.maxRetryAttempts,
-        autoReconnect: _options!.autoReconnect,
-        onError: _options!.onError,
-        useSecureConnection: _options!.useSecureConnection,
-        transport: _options!.transport,
-        skipNegotiation: _options!.skipNegotiation,
-      );
-    }
+  Stream<ConnectionStatus> get connectionStateChanges => connectionStateStream
+      .distinct()
+      .where((status) => status != ConnectionStatus.disconnected || _isInitialized);
 
-    while (_connection.state != HubConnectionState.connected &&
-        _retryCount < _options!.maxRetryAttempts) {
-      try {
-        developer.log('Attempting to reconnect to: ${_options!.serverUrl}');
-        _connectionStateController.add(ConnectionStatus.reconnecting);
-        await _connection.start();
-        _connectionStateController.add(ConnectionStatus.connected);
-        _retryCount = 0;
+  Stream<String> get errorStreamWithRetry => _errorSubject.stream
+      .where((error) => error.contains('Failed to send message') || error.contains('Connection'))
+      .debounceTime(const Duration(seconds: 2))
+      .distinct();
 
-        // Rejoin room after reconnection if we were in one
-        if (_currentConnection != null) {
-          await Future.delayed(const Duration(milliseconds: 500));
-          await joinRoom(_currentConnection!);
-        }
-
-        await _processMessageQueue();
-        break;
-      } catch (e) {
-        _retryCount++;
-        developer.log(
-          'Reconnection attempt $_retryCount failed: ${e.toString()}',
-        );
-        _errorStreamController.add(
-          'Reconnection attempt $_retryCount failed: ${e.toString()}',
-        );
-        // If DNS error, wait longer before retrying
-        if (e.toString().contains('Failed host lookup')) {
-          developer.log(
-            'DNS error detected. Waiting 5 seconds before retrying...',
-          );
-          _errorStreamController.add(
-            'DNS error: Unable to resolve server address. Waiting to retry...',
-          );
-          await Future.delayed(const Duration(seconds: 5));
-        } else if (_retryCount < _options!.maxRetryAttempts) {
-          await Future.delayed(_options!.reconnectInterval);
-        }
-      }
-    }
-
-    if (_retryCount >= _options!.maxRetryAttempts) {
-      _connectionStateController.add(ConnectionStatus.disconnected);
-      _errorStreamController.add('Max reconnection attempts reached');
-    }
-  }
-
+  // ============================================================================
+  // INITIALIZATION METHODS
+  // ============================================================================
   Future<void> initSignalR(SignalRConnectionOptions options) async {
     try {
       if (_isInitialized) {
@@ -153,7 +106,8 @@ class SignalRChatPlugin {
       }
 
       _options = options;
-      _connectionStateController.add(ConnectionStatus.connecting);
+      _connectionStateSubject.add(ConnectionStatus.connecting);
+      _isConnectedSubject.add(false);
 
       developer.log('Building SignalR connection to: ${options.serverUrl}');
 
@@ -191,20 +145,26 @@ class SignalRChatPlugin {
       developer.log('Connection ID: ${_connection.connectionId}');
 
       _isInitialized = true;
-      _connectionStateController.add(ConnectionStatus.connected);
+      _connectionStateSubject.add(ConnectionStatus.connected);
+      _isConnectedSubject.add(true);
     } catch (e, stackTrace) {
       developer.log('Failed to initialize SignalR: $e');
       developer.log('Stack trace: $stackTrace');
-      _connectionStateController.add(ConnectionStatus.disconnected);
-      _errorStreamController.add('Initialization error: $e');
+      _connectionStateSubject.add(ConnectionStatus.disconnected);
+      _isConnectedSubject.add(false);
+      _errorSubject.add('Initialization error: $e');
       rethrow;
     }
   }
 
+  // ============================================================================
+  // CONNECTION HANDLERS SETUP
+  // ============================================================================
   void _setupConnectionHandlers() {
     _connection.onclose((error) {
       developer.log('Connection closed: $error');
-      _connectionStateController.add(ConnectionStatus.disconnected);
+      _connectionStateSubject.add(ConnectionStatus.disconnected);
+      _isConnectedSubject.add(false);
       if (_options?.autoReconnect ?? false) {
         Future.delayed(const Duration(seconds: 1), () => reconnect());
       }
@@ -212,12 +172,14 @@ class SignalRChatPlugin {
 
     _connection.onreconnecting((error) {
       developer.log('Connection reconnecting: $error');
-      _connectionStateController.add(ConnectionStatus.reconnecting);
+      _connectionStateSubject.add(ConnectionStatus.reconnecting);
+      _isConnectedSubject.add(false);
     });
 
     _connection.onreconnected((connectionId) async {
       developer.log('Connection reconnected: $connectionId');
-      _connectionStateController.add(ConnectionStatus.connected);
+      _connectionStateSubject.add(ConnectionStatus.connected);
+      _isConnectedSubject.add(true);
       if (_currentConnection != null) {
         await Future.delayed(const Duration(milliseconds: 500));
         await joinRoom(_currentConnection!);
@@ -245,10 +207,10 @@ class SignalRChatPlugin {
           );
 
           developer.log('Parsed message from $sender: $content');
-          _messageStreamController.add(message);
+          _messageSubject.add(message);
         } catch (e) {
           developer.log('Error processing received message: $e');
-          _errorStreamController.add('Error processing received message: $e');
+          _errorSubject.add('Error processing received message: $e');
         }
       } else {
         developer.log('Invalid message format received');
@@ -265,10 +227,10 @@ class SignalRChatPlugin {
                   .map((user) => user.toString())
                   .toList();
           developer.log('Connected users: $users');
-          _connectedUsersStreamController.add(users);
+          _connectedUsersSubject.add(users);
         } catch (e) {
           developer.log('Error processing connected users: $e');
-          _errorStreamController.add('Error processing connected users: $e');
+          _errorSubject.add('Error processing connected users: $e');
         }
       }
     });
@@ -283,11 +245,14 @@ class SignalRChatPlugin {
       if (arguments != null && arguments.isNotEmpty) {
         final error = arguments[0]?.toString() ?? 'Unknown error';
         developer.log('Server error received: $error');
-        _errorStreamController.add('Server error: $error');
+        _errorSubject.add('Server error: $error');
       }
     });
   }
 
+  // ============================================================================
+  // ROOM MANAGEMENT
+  // ============================================================================
   Future<void> joinRoom(UserRoomConnection userConnection) async {
     if (_connection.state != HubConnectionState.connected) {
       throw Exception('Cannot join room: Not connected to server');
@@ -317,12 +282,15 @@ class SignalRChatPlugin {
         developer.log('Alternative JoinRoom invoked successfully');
       } catch (altError) {
         developer.log('Alternative invoke also failed: $altError');
-        _errorStreamController.add('Failed to join room: $e');
+        _errorSubject.add('Failed to join room: $e');
         rethrow;
       }
     }
   }
 
+  // ============================================================================
+  // MESSAGE HANDLING
+  // ============================================================================
   Future<void> sendMessage(String content) async {
     if (_connection.state != HubConnectionState.connected) {
       developer.log(
@@ -336,7 +304,7 @@ class SignalRChatPlugin {
           timestamp: DateTime.now(),
         ),
       );
-      _errorStreamController.add('Message queued for later delivery');
+      _errorSubject.add('Message queued for later delivery');
       return;
     }
 
@@ -369,7 +337,7 @@ class SignalRChatPlugin {
           ),
         );
 
-        _errorStreamController.add('Failed to send message: $e');
+        _errorSubject.add('Failed to send message: $e');
 
         final failedMessage = ChatMessage(
           sender: _currentConnection?.user ?? 'Unknown',
@@ -377,8 +345,120 @@ class SignalRChatPlugin {
           timestamp: DateTime.now(),
           status: MessageStatus.failed,
         );
-        _messageStreamController.add(failedMessage);
+        _messageSubject.add(failedMessage);
       }
+    }
+  }
+
+  Future<void> _processMessageQueue() async {
+    if (_messageQueue.isEmpty) return;
+
+    while (_messageQueue.isNotEmpty && _connection.state == HubConnectionState.connected) {
+      final message = _messageQueue.first;
+      try {
+        await sendMessage(message.content);
+        _messageQueue.removeAt(0);
+      } catch (e) {
+        _errorSubject.add('Failed to process queued message: $e');
+        break;
+      }
+    }
+  }
+
+  Future<bool> clearMessageQueue() async {
+    _messageQueue.clear();
+    return true;
+  }
+
+  // ============================================================================
+  // CONNECTION MANAGEMENT
+  // ============================================================================
+  Future<void> reconnect() async {
+    if (_options == null || !_options!.autoReconnect) return;
+
+    // Wait a bit after resume to allow network stack to recover
+    developer.log('Waiting 2 seconds before attempting reconnection...');
+    await Future.delayed(const Duration(seconds: 2));
+
+    // Check network connectivity
+    var connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult.contains(ConnectivityResult.none)) {
+      developer.log(
+        'No network available. Waiting 3 seconds to retry reconnect...',
+      );
+      _errorSubject.add('No network available. Waiting to retry...');
+      await Future.delayed(const Duration(seconds: 3));
+      return reconnect(); // Try again later
+    }
+
+    // Check and fix URL if it contains port :0
+    if (_options != null && _options!.serverUrl.contains(':0')) {
+      final fixedUrl = _options!.serverUrl.replaceAll(':0', '');
+      developer.log(
+        'Detected invalid port :0 in URL. Fixing URL from ${_options!.serverUrl} to $fixedUrl',
+      );
+      // Update the options with the corrected URL
+      _options = SignalRConnectionOptions(
+        serverUrl: fixedUrl,
+        accessToken: _options!.accessToken,
+        reconnectInterval: _options!.reconnectInterval,
+        maxRetryAttempts: _options!.maxRetryAttempts,
+        autoReconnect: _options!.autoReconnect,
+        onError: _options!.onError,
+        useSecureConnection: _options!.useSecureConnection,
+        transport: _options!.transport,
+        skipNegotiation: _options!.skipNegotiation,
+      );
+    }
+
+    while (_connection.state != HubConnectionState.connected &&
+        _retryCount < _options!.maxRetryAttempts) {
+      try {
+        developer.log('Attempting to reconnect to: ${_options!.serverUrl}');
+        _connectionStateSubject.add(ConnectionStatus.reconnecting);
+        _isConnectedSubject.add(false);
+        
+        await _connection.start();
+        
+        _connectionStateSubject.add(ConnectionStatus.connected);
+        _isConnectedSubject.add(true);
+        _retryCount = 0;
+
+        // Rejoin room after reconnection if we were in one
+        if (_currentConnection != null) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          await joinRoom(_currentConnection!);
+        }
+
+        await _processMessageQueue();
+        break;
+      } catch (e) {
+        _retryCount++;
+        developer.log(
+          'Reconnection attempt $_retryCount failed: ${e.toString()}',
+        );
+        _errorSubject.add(
+          'Reconnection attempt $_retryCount failed: ${e.toString()}',
+        );
+        // If DNS error, wait longer before retrying
+        if (e.toString().contains('Failed host lookup')) {
+          developer.log(
+            'DNS error detected. Waiting 5 seconds before retrying...',
+          );
+          _errorSubject.add(
+            'DNS error: Unable to resolve server address. Waiting to retry...',
+          );
+          await Future.delayed(const Duration(seconds: 5));
+        } else if (_retryCount < _options!.maxRetryAttempts) {
+          await Future.delayed(_options!.reconnectInterval);
+        }
+      }
+    }
+
+    if (_retryCount >= _options!.maxRetryAttempts) {
+      _connectionStateSubject.add(ConnectionStatus.disconnected);
+      _isConnectedSubject.add(false);
+      _errorSubject.add('Max reconnection attempts reached');
     }
   }
 
@@ -402,20 +482,44 @@ class SignalRChatPlugin {
       _currentConnection = null;
       _messageQueue.clear();
       _retryCount = 0;
-      _connectionStateController.add(ConnectionStatus.disconnected);
+      _connectionStateSubject.add(ConnectionStatus.disconnected);
+      _isConnectedSubject.add(false);
       developer.log('SignalR disconnected');
     }
   }
 
-  Future<bool> clearMessageQueue() async {
-    _messageQueue.clear();
-    return true;
+  // ============================================================================
+  // ADVANCED STREAM OPERATIONS
+  // ============================================================================
+  Stream<ChatMessage> getMessagesBySender(String sender) {
+    return messagesStream.where((message) => message.sender == sender);
   }
 
+  Stream<ChatMessage> getRecentMessages({int count = 10}) {
+    return messagesStream
+        .bufferTime(const Duration(seconds: 1))
+        .where((messages) => messages.isNotEmpty)
+        .map((messages) => messages.last);
+  }
+
+  Stream<List<ChatMessage>> getMessageHistory({int windowSize = 50}) {
+    return messagesStream
+        .bufferCount(windowSize)
+        .map((messages) => messages.toList());
+  }
+
+  Stream<ConnectionStatus> getConnectionStateChanges() {
+    return connectionStateStream.distinct();
+  }
+
+  // ============================================================================
+  // CLEANUP
+  // ============================================================================
   void dispose() {
-    _messageStreamController.close();
-    _connectionStateController.close();
-    _errorStreamController.close();
-    _connectedUsersStreamController.close();
+    _messageSubject.close();
+    _connectionStateSubject.close();
+    _errorSubject.close();
+    _connectedUsersSubject.close();
+    _isConnectedSubject.close();
   }
 }

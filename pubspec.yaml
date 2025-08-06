@@ -15,6 +15,7 @@ dependencies:
   flutter:
     sdk: flutter
   plugin_platform_interface: ^2.1.8
+  rxdart: ^0.27.7
   signalr_core: ^1.1.2
 
 dev_dependencies:
