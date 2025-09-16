@@ -7,7 +7,7 @@ class ChatMessage {
   final DateTime timestamp;
   final String? messageId;
   final MessageStatus status;
-  final bool? hasFile;
+  bool? hasFile;
 
   String getArabicFixedContent() {
     try {

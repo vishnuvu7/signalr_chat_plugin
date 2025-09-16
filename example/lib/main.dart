@@ -95,7 +95,7 @@ class _ChatScreenState extends State<ChatScreen> {
       // Initialize SignalR with configuration
       await _chatPlugin.initSignalR(
         SignalRConnectionOptions(
-          serverUrl: 'https://wpr.intertoons.net/cloudsanadchatbot/chat',
+          serverUrl: 'https://your-chat-url/chat',
           reconnectInterval: const Duration(seconds: 3),
           maxRetryAttempts: 5,
           autoReconnect: true,
