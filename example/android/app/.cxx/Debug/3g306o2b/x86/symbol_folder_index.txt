@@ -1,1 +1,0 @@
-C:\Users\DELL\Documents\GitHub\signalr_chat_plugin\example\build\app\intermediates\cxx\Debug\3g306o2b\obj\x86

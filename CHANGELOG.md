@@ -6,5 +6,5 @@ This file logs all changes in different versions.
 
 #### **✅ Example `CHANGELOG.md`**
 ```md
-## 1.0.0
+## 1.0.4
 - Initial release with SignalR connection, message sending, and status updates.

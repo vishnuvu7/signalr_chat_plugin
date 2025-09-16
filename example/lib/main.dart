@@ -95,7 +95,7 @@ class _ChatScreenState extends State<ChatScreen> {
       // Initialize SignalR with configuration
       await _chatPlugin.initSignalR(
         SignalRConnectionOptions(
-          serverUrl: 'https://your-chat-url/chat',
+          serverUrl: 'https://your-signalR-endpoint',
           reconnectInterval: const Duration(seconds: 3),
           maxRetryAttempts: 5,
           autoReconnect: true,
